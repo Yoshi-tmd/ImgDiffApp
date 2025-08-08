@@ -291,13 +291,16 @@ function App() {
                 onDrop={handleDrop}
                 data-name="fileA"
               >
-                <input type="file" name="fileA" onChange={handleFileChange} className="hidden-input" />
+                <input id="fileA" type="file" name="fileA" onChange={handleFileChange} className="hidden-input" />
                 {fileA ? (
                   <p>{fileA.name}</p>
                 ) : (
                   <p>ここにファイルをドラッグ＆ドロップ</p>
                 )}
               </div>
+              <label htmlFor="fileA" className="custom-file-upload">
+                ファイルを選択
+              </label>
               {fileA && (
                 <button type="button" onClick={handleFileAReset} className="cancel-button">
                   キャンセル
@@ -313,13 +316,15 @@ function App() {
                 onDrop={handleDrop}
                 data-name="fileB"
               >
-                <input type="file" name="fileB" onChange={handleFileChange} className="hidden-input" />
+                <input id="fileB" type="file" name="fileB" onChange={handleFileChange} className="hidden-input" />
                 {fileB ? (
                   <p>{fileB.name}</p>
                 ) : (
                   <p>ここにファイルをドラッグ＆ドロップ</p>
                 )}
-              </div>
+              </div><label htmlFor="fileB" className="custom-file-upload">
+                ファイルを選択
+              </label>
               {fileB && (
                 <button type="button" onClick={handleFileBReset} className="cancel-button">
                   キャンセル
@@ -346,13 +351,16 @@ function App() {
                 onDrop={handleFilesDrop}
                 data-name="filesA"
               >
-                <input type="file" name="filesA" multiple onChange={handleFilesChange} className="hidden-input" />
+                <input id="filesA" type="file" name="filesA" multiple onChange={handleFilesChange} className="hidden-input" />
                 {filesA.length > 0 ? (
                   <p>{filesA.length} 個のファイルが選択されました</p>
                 ) : (
                   <p>ここにファイルをドラッグ＆ドロップ</p>
                 )}
               </div>
+              <label htmlFor="filesA" className="custom-file-upload">
+                ファイルを選択
+              </label>
               {filesA.length > 0 && (
                 <button type="button" onClick={handleFilesAReset} className="cancel-button">
                   キャンセル
@@ -368,13 +376,16 @@ function App() {
                 onDrop={handleFilesDrop}
                 data-name="filesB"
               >
-                <input type="file" name="filesB" multiple onChange={handleFilesChange} className="hidden-input" />
+                <input id="filesB" type="file" name="filesB" multiple onChange={handleFilesChange} className="hidden-input" />
                 {filesB.length > 0 ? (
                   <p>{filesB.length} 個のファイルが選択されました</p>
                 ) : (
                   <p>ここにファイルをドラッグ＆ドロップ</p>
                 )}
               </div>
+              <label htmlFor="filesB" className="custom-file-upload">
+                ファイルを選択
+              </label>
               {filesB.length > 0 && (
                 <button type="button" onClick={handleFilesBReset} className="cancel-button">
                   キャンセル

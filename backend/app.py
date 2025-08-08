@@ -2,8 +2,8 @@ import os
 import io
 import base64
 import sys
-import time
 import uuid
+import time
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -20,14 +20,9 @@ uploads_dir = 'uploads'
 os.makedirs(uploads_dir, exist_ok=True)
 
 app = Flask(__name__)
-CORS(app)  # Reactからのリクエストを許可
-
-# -----------------
-# 既存の画像処理関数
-# -----------------
+CORS(app)
 
 def get_images(path):
-    """ファイルパスから画像リストを取得する（PDF対応）"""
     if not path:
         return []
 
@@ -35,50 +30,42 @@ def get_images(path):
 
     if extension == '.pdf':
         try:
-            # Windows環境では、popplerのパスを指定する必要があります
             poppler_path = r'C:\Program Files\poppler-24.08.0\Library\bin'
             return convert_from_path(path, dpi=200, poppler_path=poppler_path)
         except Exception as e:
-            print(f"PDFファイルの読み込みに失敗しました: {e}")
+            print(f"PDFファイルの読み込みに失敗しました: {e}", file=sys.stderr)
             return []
     else:
         try:
             return [Image.open(path)]
         except Exception as e:
-            print(f"画像ファイルの読み込みに失敗しました: {e}")
+            print(f"画像ファイルの読み込みに失敗しました: {e}", file=sys.stderr)
             return []
 
 def get_diff_image(img_a, img_b):
-    """2つの画像の差分を検出し、強調して表示する"""
     if not img_a or not img_b:
         return None
 
-    # サイズを統一
     width = max(img_a.width, img_b.width)
     height = max(img_a.height, img_b.height)
 
     img_a = img_a.resize((width, height)).convert("RGB")
     img_b = img_b.resize((width, height)).convert("RGB")
 
-    # 画像をnumpy配列に変換
     np_img_a = np.array(img_a)
     np_img_b = np.array(img_b)
 
-    # 差分を計算 (CV2を使用)
     diff = cv2.absdiff(np_img_a, np_img_b)
 
-    # 差分を強調するために、グレースケールに変換して閾値処理
     gray_diff = cv2.cvtColor(diff, cv2.COLOR_RGB2GRAY)
     _, diff_mask = cv2.threshold(gray_diff, 30, 255, cv2.THRESH_BINARY)
 
-    # マスクを適用し、差分箇所を赤色などでハイライト
     diff_highlight = np_img_b.copy()
-    diff_highlight[np.where(diff_mask == 255)] = [255, 0, 0] # 赤色でハイライト
+    diff_highlight[np.where(diff_mask == 255)] = [255, 0, 0]
 
     return Image.fromarray(diff_highlight)
 
 def image_to_base64(image):
-    """画像をBase64文字列に変換する"""
     if image:
         buffered = io.BytesIO()
         image.save(buffered, format="PNG")
@@ -86,130 +73,185 @@ def image_to_base64(image):
         return f"data:image/png;base64,{img_str}"
     return ""
 
-# -----------------
-# Flask APIエンドポイント
-# -----------------
-
 @app.route('/api/check_pages', methods=['POST'])
 def check_pages():
-    if 'fileA' not in request.files or 'fileB' not in request.files:
-        return jsonify({"error": "両方のファイルをアップロードしてください。"}), 400
+    print("ページチェックを開始します...")
+    sys.stdout.flush()
 
-    file_a = request.files['fileA']
-    file_b = request.files['fileB']
+    if 'filesA' not in request.files and 'filesB' not in request.files:
+        print("エラー: ファイルがアップロードされていません。", file=sys.stderr)
+        sys.stdout.flush()
+        return jsonify({"error": "ファイルがアップロードされていません。"}), 400
 
-    # 一時ファイル名を作成して保存
+    files_a = request.files.getlist('filesA') if 'filesA' in request.files else []
+    files_b = request.files.getlist('filesB') if 'filesB' in request.files else []
+    
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(uploads_dir, session_id)
     os.makedirs(session_dir, exist_ok=True)
     
-    path_a = os.path.join(session_dir, file_a.filename)
-    path_b = os.path.join(session_dir, file_b.filename)
-    file_a.save(path_a)
-    file_b.save(path_b)
+    file_info_a = []
+    file_info_b = []
     
-    # ページ数とファイル名をクライアントに返す
-    try:
-        images_a = get_images(path_a)
-        images_b = get_images(path_b)
+    for file in files_a:
+        path = os.path.join(session_dir, 'A_' + file.filename)
+        file.save(path)
+        images = get_images(path)
+        # ファイル名からプレフィックスを削除
+        filename_without_prefix = os.path.splitext(file.filename)[0].replace('A_', '', 1)
+        file_info_a.append({"filename": filename_without_prefix, "pages": len(images)})
         
-        len_a = len(images_a)
-        len_b = len(images_b)
+    for file in files_b:
+        path = os.path.join(session_dir, 'B_' + file.filename)
+        file.save(path)
+        images = get_images(path)
+        # ファイル名からプレフィックスを削除
+        filename_without_prefix = os.path.splitext(file.filename)[0].replace('B_', '', 1)
+        file_info_b.append({"filename": filename_without_prefix, "pages": len(images)})
 
-        return jsonify({
-            "sessionId": session_id,
-            "lenA": len_a,
-            "lenB": len_b,
-            "filenameA": file_a.filename,
-            "filenameB": file_b.filename
-        })
+    print("ページチェックが完了しました。セッションID:", session_id)
+    sys.stdout.flush()
 
-    except Exception as e:
-        print(f"ページチェック中にエラーが発生しました: {e}")
-        return jsonify({"error": "ファイルのページチェックに失敗しました。"}), 500
+    return jsonify({
+        "sessionId": session_id,
+        "filesA": file_info_a,
+        "filesB": file_info_b
+    })
 
 @app.route('/api/diff/<session_id>', methods=['GET'])
 def diff_files(session_id):
-    session_dir = os.path.join(uploads_dir, session_id)
-    if not os.path.isdir(session_dir):
-        return jsonify({"error": "セッションIDが見つかりません。"}), 404
-        
-    files = os.listdir(session_dir)
-    if len(files) < 2:
-        return jsonify({"error": "差分チェック用のファイルが見つかりません。"}), 404
-
-    # ファイルパスを取得
-    path_a = os.path.join(session_dir, files[0])
-    path_b = os.path.join(session_dir, files[1])
-
-    print("差分チェックの準備を開始します...")
+    print(f"セッションID: {session_id} の差分チェックを開始します...")
     sys.stdout.flush()
-
     start_time = time.time()
 
-    images_a = get_images(path_a)
-    images_b = get_images(path_b)
-    len_a = len(images_a)
-    len_b = len(images_b)
+    session_dir = os.path.join(uploads_dir, session_id)
+    if not os.path.isdir(session_dir):
+        print("エラー: セッションIDが見つかりません。", file=sys.stderr)
+        sys.stdout.flush()
+        return jsonify({"error": "セッションIDが見つかりません。"}), 404
+    
+    files = os.listdir(session_dir)
+    if not files:
+        print("エラー: 差分チェック用のファイルが見つかりません。", file=sys.stderr)
+        sys.stdout.flush()
+        return jsonify({"error": "差分チェック用のファイルが見つかりません。"}), 404
 
-    if not images_a and not images_b:
-        return jsonify({"error": "画像ファイルの読み込みに問題が発生しました。"}), 500
-
+    files_a_paths = sorted([os.path.join(session_dir, f) for f in files if f.startswith('A_')])
+    files_b_paths = sorted([os.path.join(session_dir, f) for f in files if f.startswith('B_')])
+    
     results = []
-    num_pages = max(len_a, len_b)
-
-    for i in range(num_pages):
-        page_number = i + 1
-        print(f"ページ {page_number} の処理を開始します...")
+    
+    # 複数ページPDF（通常チェック）のロジック
+    if len(files_a_paths) == 1 and len(files_b_paths) == 1:
+        print("複数ページPDFの通常チェックモードで実行します。")
         sys.stdout.flush()
 
-        img_a_exists = i < len_a
-        img_b_exists = i < len_b
+        images_a = get_images(files_a_paths[0])
+        images_b = get_images(files_b_paths[0])
+        len_a = len(images_a)
+        len_b = len(images_b)
+
+        if not images_a and not images_b:
+            print("エラー: 画像ファイルの読み込みに問題が発生しました。", file=sys.stderr)
+            sys.stdout.flush()
+            return jsonify({"error": "画像ファイルの読み込みに問題が発生しました。"}), 500
+
+        num_pages = max(len_a, len_b)
         
-        # ページが存在しない場合（追加または削除）
-        if not img_a_exists:
-            status = "added"
-            img_b = images_b[i]
+        for i in range(num_pages):
+            page_number = i + 1
+            print(f"ページ {page_number} の処理を開始します...")
+            sys.stdout.flush()
+
+            img_a_exists = i < len_a
+            img_b_exists = i < len_b
+            
+            status = "unchanged"
             diff_img = None
             img_a = None
-        elif not img_b_exists:
-            status = "removed"
-            img_a = images_a[i]
-            diff_img = None
             img_b = None
-        # 両方存在する場合（変更または変更なし）
-        else:
-            img_a = images_a[i]
-            img_b = images_b[i]
-            diff_img = get_diff_image(img_a, img_b)
+
+            if not img_a_exists:
+                status = "added"
+                img_b = images_b[i]
+            elif not img_b_exists:
+                status = "removed"
+                img_a = images_a[i]
+            else:
+                img_a = images_a[i]
+                img_b = images_b[i]
+                diff_img = get_diff_image(img_a, img_b)
+                diff_array = np.array(diff_img)
+                if np.sum(diff_array) > 0:
+                    status = "changed"
             
-            # 差分がない場合は"unchanged"、ある場合は"changed"
-            diff_array = np.array(diff_img)
-            status = "changed" if np.sum(diff_array) > 0 else "unchanged"
-
-        originalA_base64 = image_to_base64(img_a)
-        originalB_base64 = image_to_base64(img_b)
-        diffImage_base64 = image_to_base64(diff_img)
-        
-        results.append({
-            "page": page_number,
-            "status": status,
-            "originalA": originalA_base64,
-            "originalB": originalB_base64,
-            "diffImage": diffImage_base64
-        })
-
-        print(f"ページ {page_number} の処理が完了しました。")
-        sys.stdout.flush()
+            originalA_base64 = image_to_base64(img_a)
+            originalB_base64 = image_to_base64(img_b)
+            diffImage_base64 = image_to_base64(diff_img)
+            
+            results.append({
+                "filename": f"ページ {page_number}",
+                "status": status,
+                "originalA": originalA_base64,
+                "originalB": originalB_base64,
+                "diffImage": diffImage_base64
+            })
+            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}")
+            sys.stdout.flush()
     
+    # 複数ファイル（レアケース）のロジック
+    else:
+        print("複数ファイルのレアケースチェックモードで実行します。")
+        sys.stdout.flush()
+
+        # ファイル名を拡張子なし、プレフィックスなしでペアリング
+        dict_a = {os.path.splitext(os.path.basename(f))[0].replace('A_', '', 1): f for f in files_a_paths}
+        dict_b = {os.path.splitext(os.path.basename(f))[0].replace('B_', '', 1): f for f in files_b_paths}
+
+        all_filenames = sorted(list(set(dict_a.keys()) | set(dict_b.keys())))
+        
+        for filename in all_filenames:
+            print(f"ファイル: {filename} の比較を開始します...")
+            sys.stdout.flush()
+
+            path_a = dict_a.get(filename)
+            path_b = dict_b.get(filename)
+
+            img_a = get_images(path_a)[0] if path_a and get_images(path_a) else None
+            img_b = get_images(path_b)[0] if path_b and get_images(path_b) else None
+            
+            status = "unchanged"
+            diff_img = None
+
+            if not img_a:
+                status = "added"
+            elif not img_b:
+                status = "removed"
+            else:
+                diff_img = get_diff_image(img_a, img_b)
+                diff_array = np.array(diff_img)
+                status = "changed" if np.sum(diff_array) > 0 else "unchanged"
+
+            originalA_base64 = image_to_base64(img_a)
+            originalB_base64 = image_to_base64(img_b)
+            diffImage_base64 = image_to_base64(diff_img)
+            
+            results.append({
+                "filename": filename,
+                "status": status,
+                "originalA": originalA_base64,
+                "originalB": originalB_base64,
+                "diffImage": diffImage_base64
+            })
+            print(f"ファイル: {filename} の比較が完了しました。ステータス: {status}")
+            sys.stdout.flush()
+
     end_time = time.time()
     elapsed_time = end_time - start_time
-
-    print(f"すべてのページの処理が完了しました。所要時間: {elapsed_time:.2f}秒")
+    print(f"すべての差分チェックが完了しました。所要時間: {elapsed_time:.2f}秒")
     sys.stdout.flush()
-    
-    return jsonify({"results": results})
 
+    return jsonify({"results": results})
 
 if __name__ == '__main__':
     app.run(debug=True)

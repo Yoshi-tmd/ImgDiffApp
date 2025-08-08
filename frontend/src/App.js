@@ -3,8 +3,11 @@ import axios from 'axios';
 import './App.css';
 
 function App() {
-  const [fileA, setFileA] = useState(null);
-  const [fileB, setFileB] = useState(null);
+  const [fileA, setFileA] = useState(null); // 通常チェック用
+  const [fileB, setFileB] = useState(null); // 通常チェック用
+  const [filesA, setFilesA] = useState([]); // レアケースチェック用
+  const [filesB, setFilesB] = useState([]); // レアケースチェック用
+  
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -13,15 +16,23 @@ function App() {
   const [sessionId, setSessionId] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState({});
 
-  const handleFileChange = (e) => {
+  const handleFileChange = (e) => { // 通常チェック用
     if (e.target.name === 'fileA') {
       setFileA(e.target.files[0]);
     } else {
       setFileB(e.target.files[0]);
     }
   };
-  
-const handlePageCheck = async (e) => {
+
+  const handleFilesChange = (e) => { // レアケースチェック用
+    if (e.target.name === 'filesA') {
+      setFilesA(e.target.files);
+    } else {
+      setFilesB(e.target.files);
+    }
+  };
+
+  const handleNormalDiffCheck = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
@@ -31,56 +42,104 @@ const handlePageCheck = async (e) => {
     setCurrentImageIndex({});
 
     if (!fileA || !fileB) {
-        setError('両方のファイルをアップロードしてください。');
-        setLoading(false);
-        return;
+      setError('両方のファイルをアップロードしてください。');
+      setLoading(false);
+      return;
     }
-    
-    setStatus('ページリストを取得中...');
+
+    setStatus('差分チェックを開始します...');
 
     const formData = new FormData();
-    formData.append('fileA', fileA);
-    formData.append('fileB', fileB);
+    formData.append('filesA', fileA);
+    formData.append('filesB', fileB);
 
     try {
-        const response = await axios.post('http://127.0.0.1:5000/api/check_pages', formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data',
-            },
-        });
-        setSessionId(response.data.sessionId);
-        setPageInfo(response.data);
-        setStatus('ページリストの確認が完了しました。');
+      const response = await axios.post('http://127.0.0.1:5000/api/check_pages', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      const currentSessionId = response.data.sessionId;
+      setSessionId(currentSessionId);
+      
+      const diffResponse = await axios.get(`http://127.0.0.1:5000/api/diff/${currentSessionId}`);
+      setResult(diffResponse.data);
+      setStatus('差分チェックが完了しました。');
     } catch (err) {
-        setError('ページチェック中にエラーが発生しました。');
-        console.error(err);
-        setStatus('');
+      setError('差分チェック中にエラーが発生しました。');
+      console.error(err);
+      setStatus('');
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleDiffCheck = async () => {
+  const handleRareCaseCheckPages = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setPageInfo(null);
+    setSessionId(null);
+    setCurrentImageIndex({});
+
+    if (filesA.length === 0 || filesB.length === 0) {
+      setError('両方のファイルグループをアップロードしてください。');
+      setLoading(false);
+      return;
+    }
+
+    setStatus('ページリストを取得中...');
+
+    const formData = new FormData();
+    for (let i = 0; i < filesA.length; i++) {
+      formData.append('filesA', filesA[i]);
+    }
+    for (let i = 0; i < filesB.length; i++) {
+      formData.append('filesB', filesB[i]);
+    }
+
+    try {
+      const response = await axios.post('http://127.0.0.1:5000/api/check_pages', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      setSessionId(response.data.sessionId);
+      setPageInfo(response.data);
+      setStatus('ページリストの確認が完了しました。');
+    } catch (err) {
+      setError('ページチェック中にエラーが発生しました。');
+      console.error(err);
+      setStatus('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRareCaseDiffCheck = async () => {
     setLoading(true);
     setError(null);
     setStatus('差分チェックを開始します...');
     
     try {
-        const response = await axios.get(`http://127.0.0.1:5000/api/diff/${sessionId}`);
-        setResult(response.data);
-        setStatus('差分チェックが完了しました。');
+      const response = await axios.get(`http://127.0.0.1:5000/api/diff/${sessionId}`);
+      setResult(response.data);
+      setStatus('差分チェックが完了しました。');
     } catch (err) {
-        setError('差分チェック中にエラーが発生しました。');
-        console.error(err);
-        setStatus('');
+      setError('差分チェック中にエラーが発生しました。');
+      console.error(err);
+      setStatus('');
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
   const handleReset = () => {
     setFileA(null);
     setFileB(null);
+    setFilesA([]);
+    setFilesB([]);
     setResult(null);
     setLoading(false);
     setError(null);
@@ -88,13 +147,47 @@ const handlePageCheck = async (e) => {
     setPageInfo(null);
     setSessionId(null);
     setCurrentImageIndex({});
+    
+    // input要素の値をリセット
+    const fileInputA = document.querySelector('input[name="fileA"]');
+    if (fileInputA) fileInputA.value = null;
+    const fileInputB = document.querySelector('input[name="fileB"]');
+    if (fileInputB) fileInputB.value = null;
+    const filesInputA = document.querySelector('input[name="filesA"]');
+    if (filesInputA) filesInputA.value = null;
+    const filesInputB = document.querySelector('input[name="filesB"]');
+    if (filesInputB) filesInputB.value = null;
+  };
+  
+  const handleFileAReset = () => {
+    setFileA(null);
+    const fileInput = document.querySelector('input[name="fileA"]');
+    if (fileInput) fileInput.value = null;
   };
 
-  const handleImageClick = (pageNumber) => {
+  const handleFileBReset = () => {
+    setFileB(null);
+    const fileInput = document.querySelector('input[name="fileB"]');
+    if (fileInput) fileInput.value = null;
+  };
+  
+  const handleFilesAReset = () => {
+    setFilesA([]);
+    const filesInput = document.querySelector('input[name="filesA"]');
+    if (filesInput) filesInput.value = null;
+  };
+  
+  const handleFilesBReset = () => {
+    setFilesB([]);
+    const filesInput = document.querySelector('input[name="filesB"]');
+    if (filesInput) filesInput.value = null;
+  };
+
+  const handleImageClick = (filename) => {
     setCurrentImageIndex(prevState => {
-      const currentIndex = prevState[pageNumber] || 0;
-      const nextIndex = (currentIndex + 1) % 3; // 0, 1, 2を循環
-      return { ...prevState, [pageNumber]: nextIndex };
+      const currentIndex = prevState[filename] || 0;
+      const nextIndex = (currentIndex + 1) % 3;
+      return { ...prevState, [filename]: nextIndex };
     });
   };
 
@@ -128,41 +221,95 @@ const handlePageCheck = async (e) => {
     <div className="App">
       <header className="App-header">
         <h1>画像差分チェッカー</h1>
-        {/* <--- ページリストを取得するためのフォーム --- > */}
-        {!pageInfo && (
-            <form onSubmit={handlePageCheck}>
-                <div className="file-input-container">
-                    <label htmlFor="fileA">ファイルA:</label>
-                    <input type="file" name="fileA" onChange={handleFileChange} />
-                </div>
-                <div className="file-input-container">
-                    <label htmlFor="fileB">ファイルB:</label>
-                    <input type="file" name="fileB" onChange={handleFileChange} />
-                </div>
-                <button type="submit" disabled={loading}>
-                    {loading ? '処理中...' : 'ページチェック'}
-                </button>
-            </form>
-        )}
         
-        {/* <--- ページリストと差分チェックボタン --- > */}
-        {pageInfo && !result && (
-            <div>
-                <h2>ページリスト</h2>
-                <div className="page-check-container">
-                    <p>ファイルA: {pageInfo.lenA}ページ</p>
-                    <p>ファイルB: {pageInfo.lenB}ページ</p>
-                    {pageInfo.lenA !== pageInfo.lenB && (
-                        <p className="warning">⚠️ ページ数が異なります！</p>
-                    )}
-                </div>
-                <button onClick={handleDiffCheck} disabled={loading}>
-                    {loading ? '処理中...' : '差分チェック開始'}
+        {/* 通常チェック用フォーム */}
+        {!pageInfo && !filesA.length && !filesB.length && (
+          <form onSubmit={handleNormalDiffCheck}>
+            <h3>📄 通常チェック (複数ページPDF)</h3>
+            <div className="file-input-container">
+              <label htmlFor="fileA">ファイルA:</label>
+              <input type="file" name="fileA" onChange={handleFileChange} />
+              {fileA && (
+                <button type="button" onClick={handleFileAReset} className="cancel-button">
+                  キャンセル
                 </button>
+              )}
             </div>
+            <div className="file-input-container">
+              <label htmlFor="fileB">ファイルB:</label>
+              <input type="file" name="fileB" onChange={handleFileChange} />
+              {fileB && (
+                <button type="button" onClick={handleFileBReset} className="cancel-button">
+                  キャンセル
+                </button>
+              )}
+            </div>
+            <button type="submit" disabled={loading || !fileA || !fileB}>
+              {loading ? '処理中...' : '差分チェック開始'}
+            </button>
+          </form>
         )}
         
-        {/* <--- ステータスとエラーの表示 --- > */}
+        {/* レアケースチェック用フォーム */}
+        {!pageInfo && !fileA && !fileB && (
+          <form onSubmit={handleRareCaseCheckPages}>
+            <hr />
+            <h3>📁 レアケースチェック (複数ファイル)</h3>
+            <div className="file-input-container">
+              <label htmlFor="filesA">ファイルAグループ:</label>
+              <input type="file" name="filesA" multiple onChange={handleFilesChange} />
+              {filesA.length > 0 && (
+                <button type="button" onClick={handleFilesAReset} className="cancel-button">
+                  キャンセル
+                </button>
+              )}
+            </div>
+            <div className="file-input-container">
+              <label htmlFor="filesB">ファイルBグループ:</label>
+              <input type="file" name="filesB" multiple onChange={handleFilesChange} />
+              {filesB.length > 0 && (
+                <button type="button" onClick={handleFilesBReset} className="cancel-button">
+                  キャンセル
+                </button>
+              )}
+            </div>
+            <button type="submit" disabled={loading || filesA.length === 0 || filesB.length === 0}>
+              {loading ? '処理中...' : 'ページチェック'}
+            </button>
+          </form>
+        )}
+
+        {/* レアケース用ページリスト */}
+        {pageInfo && !result && (
+          <div>
+            <h2>ページリスト</h2>
+            <div className="page-check-container">
+              <div className="page-check-group">
+                <h3>ファイルAグループ</h3>
+                <ul>
+                  {pageInfo.filesA.map((f, i) => (
+                    <li key={`A-${i}`}>{f.filename} ({f.pages}ページ)</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="page-check-group">
+                <h3>ファイルBグループ</h3>
+                <ul>
+                  {pageInfo.filesB.map((f, i) => (
+                    <li key={`B-${i}`}>{f.filename} ({f.pages}ページ)</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <button onClick={handleRareCaseDiffCheck} disabled={loading}>
+              {loading ? '処理中...' : '差分チェック開始'}
+            </button>
+            <button type="button" onClick={handleReset} className="cancel-button">
+              キャンセル
+            </button>
+          </div>
+        )}
+        
         {status && <p className="status-message">{status}</p>}
         {error && <p className="error">{error}</p>}
 
@@ -170,26 +317,38 @@ const handlePageCheck = async (e) => {
           <div>
             <div className="results-container">
               {result.results.map((pageResult) => (
-                <div key={pageResult.page} className="page-container">
-                  <h2>ページ {pageResult.page}</h2>
+                <div key={pageResult.filename} className="page-container">
+                  <h2>{pageResult.filename}</h2>
                   <div className="image-set-container">
                     <div className="image-comparison-container">
                       <div className="image-pair">
                         <h3>ファイルA</h3>
-                        <img src={pageResult.originalA || ''} alt={`Original A - Page ${pageResult.page}`} />
+                        {pageResult.originalA ? (
+                          <img src={pageResult.originalA} alt={`Original A - ${pageResult.filename}`} />
+                        ) : (
+                          <span>---</span>
+                        )}
                       </div>
                       <div className="image-pair">
                         <h3>ファイルB</h3>
-                        <img src={pageResult.originalB || ''} alt={`Original B - Page ${pageResult.page}`} />
+                        {pageResult.originalB ? (
+                          <img src={pageResult.originalB} alt={`Original B - ${pageResult.filename}`} />
+                        ) : (
+                          <span>---</span>
+                        )}
                       </div>
                     </div>
-                    <div className="image-pair">
-                      <h3>{getImageName(currentImageIndex[pageResult.page] || 0)}</h3>
-                      <img
-                        src={getImageSrc(pageResult, currentImageIndex[pageResult.page] || 0)}
-                        alt={`Difference - Page ${pageResult.page}`}
-                        onClick={() => handleImageClick(pageResult.page)}
-                      />
+                    <div className="image-pair diff-image-pair">
+                      <h3>{getImageName(currentImageIndex[pageResult.filename] || 0)}</h3>
+                      {pageResult.diffImage || pageResult.originalA || pageResult.originalB ? (
+                        <img
+                          src={getImageSrc(pageResult, currentImageIndex[pageResult.filename] || 0)}
+                          alt={`Difference - ${pageResult.filename}`}
+                          onClick={() => handleImageClick(pageResult.filename)}
+                        />
+                      ) : (
+                        <span>差分画像はありません</span>
+                      )}
                     </div>
                   </div>
                 </div>

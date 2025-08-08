@@ -4,6 +4,8 @@ import base64
 import sys
 import uuid
 import time
+import shutil
+import threading
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -21,6 +23,25 @@ os.makedirs(uploads_dir, exist_ok=True)
 
 app = Flask(__name__)
 CORS(app)
+
+# セッション管理のためのグローバル変数
+SESSIONS = {}
+
+# セッションを自動削除する関数
+def clear_session_after_delay(session_id, delay):
+    def delete_session():
+        print(f"セッション {session_id} が期限切れになりました。ファイルを削除します。")
+        try:
+            session_dir = os.path.join(uploads_dir, session_id)
+            if os.path.exists(session_dir):
+                shutil.rmtree(session_dir)
+            if session_id in SESSIONS:
+                del SESSIONS[session_id]
+        except Exception as e:
+            print(f"セッションディレクトリ {session_id} の削除中にエラーが発生しました: {e}", file=sys.stderr)
+    
+    timer = threading.Timer(delay, delete_session)
+    timer.start()
 
 def get_images(path):
     if not path:
@@ -90,6 +111,8 @@ def check_pages():
     session_dir = os.path.join(uploads_dir, session_id)
     os.makedirs(session_dir, exist_ok=True)
     
+    SESSIONS[session_id] = {'dir': session_dir}
+    
     file_info_a = []
     file_info_b = []
     
@@ -97,7 +120,6 @@ def check_pages():
         path = os.path.join(session_dir, 'A_' + file.filename)
         file.save(path)
         images = get_images(path)
-        # ファイル名からプレフィックスを削除
         filename_without_prefix = os.path.splitext(file.filename)[0].replace('A_', '', 1)
         file_info_a.append({"filename": filename_without_prefix, "pages": len(images)})
         
@@ -105,7 +127,6 @@ def check_pages():
         path = os.path.join(session_dir, 'B_' + file.filename)
         file.save(path)
         images = get_images(path)
-        # ファイル名からプレフィックスを削除
         filename_without_prefix = os.path.splitext(file.filename)[0].replace('B_', '', 1)
         file_info_b.append({"filename": filename_without_prefix, "pages": len(images)})
 
@@ -141,7 +162,6 @@ def diff_files(session_id):
     
     results = []
     
-    # 複数ページPDF（通常チェック）のロジック
     if len(files_a_paths) == 1 and len(files_b_paths) == 1:
         print("複数ページPDFの通常チェックモードで実行します。")
         sys.stdout.flush()
@@ -199,12 +219,10 @@ def diff_files(session_id):
             print(f"ページ {page_number} の比較が完了しました。ステータス: {status}")
             sys.stdout.flush()
     
-    # 複数ファイル（レアケース）のロジック
     else:
         print("複数ファイルのレアケースチェックモードで実行します。")
         sys.stdout.flush()
 
-        # ファイル名を拡張子なし、プレフィックスなしでペアリング
         dict_a = {os.path.splitext(os.path.basename(f))[0].replace('A_', '', 1): f for f in files_a_paths}
         dict_b = {os.path.splitext(os.path.basename(f))[0].replace('B_', '', 1): f for f in files_b_paths}
 
@@ -252,6 +270,21 @@ def diff_files(session_id):
     sys.stdout.flush()
 
     return jsonify({"results": results})
+
+@app.route('/api/clear_session/<session_id>', methods=['POST'])
+def clear_session(session_id):
+    if session_id in SESSIONS:
+        try:
+            session_dir = os.path.join(uploads_dir, session_id)
+            if os.path.exists(session_dir):
+                shutil.rmtree(session_dir)
+            del SESSIONS[session_id]
+            print(f"Session {session_id} successfully cleared.")
+        except Exception as e:
+            print(f"Error clearing session {session_id}: {e}", file=sys.stderr)
+            return jsonify({'message': 'Error clearing session'}), 500
+    return jsonify({'message': 'Session cleared'})
+
 
 if __name__ == '__main__':
     app.run(debug=True)

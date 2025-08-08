@@ -141,7 +141,15 @@ function App() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
+    // 既存のセッションIDがあればバックエンドに削除リクエストを送る
+    if (sessionId) {
+      try {
+        await axios.post(`http://127.0.0.1:5000/api/clear_session/${sessionId}`);
+      } catch (error) {
+        console.error('Error clearing session:', error);
+      }
+    }
     setFileA(null);
     setFileB(null);
     setFilesA([]);

@@ -16,7 +16,13 @@ function App() {
   const [sessionId, setSessionId] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState({});
 
-  const handleFileChange = (e) => { // 通常チェック用
+  // ドラッグ＆ドロップ関連のstate
+  const [isDraggingA, setIsDraggingA] = useState(false);
+  const [isDraggingB, setIsDraggingB] = useState(false);
+  const [isDraggingFilesA, setIsDraggingFilesA] = useState(false);
+  const [isDraggingFilesB, setIsDraggingFilesB] = useState(false);
+  
+  const handleFileChange = (e) => {
     if (e.target.name === 'fileA') {
       setFileA(e.target.files[0]);
     } else {
@@ -24,7 +30,7 @@ function App() {
     }
   };
 
-  const handleFilesChange = (e) => { // レアケースチェック用
+  const handleFilesChange = (e) => {
     if (e.target.name === 'filesA') {
       setFilesA(e.target.files);
     } else {
@@ -147,40 +153,22 @@ function App() {
     setPageInfo(null);
     setSessionId(null);
     setCurrentImageIndex({});
-    
-    // input要素の値をリセット
-    const fileInputA = document.querySelector('input[name="fileA"]');
-    if (fileInputA) fileInputA.value = null;
-    const fileInputB = document.querySelector('input[name="fileB"]');
-    if (fileInputB) fileInputB.value = null;
-    const filesInputA = document.querySelector('input[name="filesA"]');
-    if (filesInputA) filesInputA.value = null;
-    const filesInputB = document.querySelector('input[name="filesB"]');
-    if (filesInputB) filesInputB.value = null;
   };
   
   const handleFileAReset = () => {
     setFileA(null);
-    const fileInput = document.querySelector('input[name="fileA"]');
-    if (fileInput) fileInput.value = null;
   };
 
   const handleFileBReset = () => {
     setFileB(null);
-    const fileInput = document.querySelector('input[name="fileB"]');
-    if (fileInput) fileInput.value = null;
   };
   
   const handleFilesAReset = () => {
     setFilesA([]);
-    const filesInput = document.querySelector('input[name="filesA"]');
-    if (filesInput) filesInput.value = null;
   };
   
   const handleFilesBReset = () => {
     setFilesB([]);
-    const filesInput = document.querySelector('input[name="filesB"]');
-    if (filesInput) filesInput.value = null;
   };
 
   const handleImageClick = (filename) => {
@@ -217,18 +205,91 @@ function App() {
     }
   };
 
+  // ドラッグ＆ドロップイベントハンドラ (通常チェック)
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    if (e.currentTarget.dataset.name === 'fileA') {
+      setIsDraggingA(true);
+    } else {
+      setIsDraggingB(true);
+    }
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    if (e.currentTarget.dataset.name === 'fileA') {
+      setIsDraggingA(false);
+    } else {
+      setIsDraggingB(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    if (e.currentTarget.dataset.name === 'fileA') {
+      setFileA(e.dataTransfer.files[0]);
+      setIsDraggingA(false);
+    } else {
+      setFileB(e.dataTransfer.files[0]);
+      setIsDraggingB(false);
+    }
+  };
+  
+  // ドラッグ＆ドロップイベントハンドラ (レアケースチェック)
+  const handleFilesDragOver = (e) => {
+    e.preventDefault();
+    if (e.currentTarget.dataset.name === 'filesA') {
+      setIsDraggingFilesA(true);
+    } else {
+      setIsDraggingFilesB(true);
+    }
+  };
+
+  const handleFilesDragLeave = (e) => {
+    e.preventDefault();
+    if (e.currentTarget.dataset.name === 'filesA') {
+      setIsDraggingFilesA(false);
+    } else {
+      setIsDraggingFilesB(false);
+    }
+  };
+  
+  const handleFilesDrop = (e) => {
+    e.preventDefault();
+    if (e.currentTarget.dataset.name === 'filesA') {
+      setFilesA(e.dataTransfer.files);
+      setIsDraggingFilesA(false);
+    } else {
+      setFilesB(e.dataTransfer.files);
+      setIsDraggingFilesB(false);
+    }
+  };
+
   return (
     <div className="App">
       <header className="App-header">
         <h1>画像差分チェッカー</h1>
         
         {/* 通常チェック用フォーム */}
-        {!pageInfo && !filesA.length && !filesB.length && (
+        {!pageInfo && filesA.length === 0 && filesB.length === 0 && (
           <form onSubmit={handleNormalDiffCheck}>
             <h3>📄 通常チェック (複数ページPDF)</h3>
             <div className="file-input-container">
               <label htmlFor="fileA">ファイルA:</label>
-              <input type="file" name="fileA" onChange={handleFileChange} />
+              <div
+                className={`drop-area ${isDraggingA ? 'dragging' : ''}`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                data-name="fileA"
+              >
+                <input type="file" name="fileA" onChange={handleFileChange} className="hidden-input" />
+                {fileA ? (
+                  <p>{fileA.name}</p>
+                ) : (
+                  <p>ここにファイルをドラッグ＆ドロップ</p>
+                )}
+              </div>
               {fileA && (
                 <button type="button" onClick={handleFileAReset} className="cancel-button">
                   キャンセル
@@ -237,7 +298,20 @@ function App() {
             </div>
             <div className="file-input-container">
               <label htmlFor="fileB">ファイルB:</label>
-              <input type="file" name="fileB" onChange={handleFileChange} />
+              <div
+                className={`drop-area ${isDraggingB ? 'dragging' : ''}`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                data-name="fileB"
+              >
+                <input type="file" name="fileB" onChange={handleFileChange} className="hidden-input" />
+                {fileB ? (
+                  <p>{fileB.name}</p>
+                ) : (
+                  <p>ここにファイルをドラッグ＆ドロップ</p>
+                )}
+              </div>
               {fileB && (
                 <button type="button" onClick={handleFileBReset} className="cancel-button">
                   キャンセル
@@ -257,7 +331,20 @@ function App() {
             <h3>📁 レアケースチェック (複数ファイル)</h3>
             <div className="file-input-container">
               <label htmlFor="filesA">ファイルAグループ:</label>
-              <input type="file" name="filesA" multiple onChange={handleFilesChange} />
+              <div
+                className={`drop-area ${isDraggingFilesA ? 'dragging' : ''}`}
+                onDragOver={handleFilesDragOver}
+                onDragLeave={handleFilesDragLeave}
+                onDrop={handleFilesDrop}
+                data-name="filesA"
+              >
+                <input type="file" name="filesA" multiple onChange={handleFilesChange} className="hidden-input" />
+                {filesA.length > 0 ? (
+                  <p>{filesA.length} 個のファイルが選択されました</p>
+                ) : (
+                  <p>ここにファイルをドラッグ＆ドロップ</p>
+                )}
+              </div>
               {filesA.length > 0 && (
                 <button type="button" onClick={handleFilesAReset} className="cancel-button">
                   キャンセル
@@ -266,7 +353,20 @@ function App() {
             </div>
             <div className="file-input-container">
               <label htmlFor="filesB">ファイルBグループ:</label>
-              <input type="file" name="filesB" multiple onChange={handleFilesChange} />
+              <div
+                className={`drop-area ${isDraggingFilesB ? 'dragging' : ''}`}
+                onDragOver={handleFilesDragOver}
+                onDragLeave={handleFilesDragLeave}
+                onDrop={handleFilesDrop}
+                data-name="filesB"
+              >
+                <input type="file" name="filesB" multiple onChange={handleFilesChange} className="hidden-input" />
+                {filesB.length > 0 ? (
+                  <p>{filesB.length} 個のファイルが選択されました</p>
+                ) : (
+                  <p>ここにファイルをドラッグ＆ドロップ</p>
+                )}
+              </div>
               {filesB.length > 0 && (
                 <button type="button" onClick={handleFilesBReset} className="cancel-button">
                   キャンセル
@@ -284,20 +384,26 @@ function App() {
           <div>
             <h2>ページリスト</h2>
             <div className="page-check-container">
-              <div className="page-check-group">
+              <div className="page-check-group list-group-a">
                 <h3>ファイルAグループ</h3>
                 <ul>
-                  {pageInfo.filesA.map((f, i) => (
-                    <li key={`A-${i}`}>{f.filename} ({f.pages}ページ)</li>
-                  ))}
+                  {Array.from(new Set([...pageInfo.filesA.map(f => f.filename), ...pageInfo.filesB.map(f => f.filename)]))
+                    .sort()
+                    .map((filename, i) => {
+                      const fileAInfo = pageInfo.filesA.find(f => f.filename === filename);
+                      return <li key={`A-${i}`}>{fileAInfo ? `${fileAInfo.filename}` : '---'}</li>;
+                    })}
                 </ul>
               </div>
-              <div className="page-check-group">
+              <div className="page-check-group list-group-b">
                 <h3>ファイルBグループ</h3>
                 <ul>
-                  {pageInfo.filesB.map((f, i) => (
-                    <li key={`B-${i}`}>{f.filename} ({f.pages}ページ)</li>
-                  ))}
+                  {Array.from(new Set([...pageInfo.filesA.map(f => f.filename), ...pageInfo.filesB.map(f => f.filename)]))
+                    .sort()
+                    .map((filename, i) => {
+                      const fileBInfo = pageInfo.filesB.find(f => f.filename === filename);
+                      return <li key={`B-${i}`}>{fileBInfo ? `${fileBInfo.filename}` : '---'}</li>;
+                    })}
                 </ul>
               </div>
             </div>
@@ -340,7 +446,7 @@ function App() {
                     </div>
                     <div className="image-pair diff-image-pair">
                       <h3>{getImageName(currentImageIndex[pageResult.filename] || 0)}</h3>
-                      {pageResult.diffImage || pageResult.originalA || pageResult.originalB ? (
+                      {pageResult.status === 'changed' || pageResult.status === 'unchanged' ? (
                         <img
                           src={getImageSrc(pageResult, currentImageIndex[pageResult.filename] || 0)}
                           alt={`Difference - ${pageResult.filename}`}

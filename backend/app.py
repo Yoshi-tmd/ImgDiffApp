@@ -4,8 +4,6 @@ import base64
 import sys
 import uuid
 import time
-import shutil
-import threading
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -24,25 +22,6 @@ os.makedirs(uploads_dir, exist_ok=True)
 app = Flask(__name__)
 CORS(app)
 
-# セッション管理のためのグローバル変数
-SESSIONS = {}
-
-# セッションを自動削除する関数
-def clear_session_after_delay(session_id, delay):
-    def delete_session():
-        print(f"セッション {session_id} が期限切れになりました。ファイルを削除します。")
-        try:
-            session_dir = os.path.join(uploads_dir, session_id)
-            if os.path.exists(session_dir):
-                shutil.rmtree(session_dir)
-            if session_id in SESSIONS:
-                del SESSIONS[session_id]
-        except Exception as e:
-            print(f"セッションディレクトリ {session_id} の削除中にエラーが発生しました: {e}", file=sys.stderr)
-    
-    timer = threading.Timer(delay, delete_session)
-    timer.start()
-
 def get_images(path):
     if not path:
         return []
@@ -51,6 +30,7 @@ def get_images(path):
 
     if extension == '.pdf':
         try:
+            # popplerのパスを適宜修正
             poppler_path = r'C:\Program Files\poppler-24.08.0\Library\bin'
             return convert_from_path(path, dpi=200, poppler_path=poppler_path)
         except Exception as e:
@@ -65,7 +45,9 @@ def get_images(path):
 
 def get_diff_image(img_a, img_b):
     if not img_a or not img_b:
-        return None
+        return None, False, 0.0
+
+    DIFFERENCE_THRESHOLD_PERCENTAGE = 0.005
 
     width = max(img_a.width, img_b.width)
     height = max(img_a.height, img_b.height)
@@ -77,15 +59,23 @@ def get_diff_image(img_a, img_b):
     np_img_b = np.array(img_b)
 
     diff = cv2.absdiff(np_img_a, np_img_b)
-
     gray_diff = cv2.cvtColor(diff, cv2.COLOR_RGB2GRAY)
     _, diff_mask = cv2.threshold(gray_diff, 30, 255, cv2.THRESH_BINARY)
+    
+    diff_pixels = np.sum(diff_mask > 0)
+    total_pixels = width * height
+    
+    difference_percentage = (diff_pixels / total_pixels) * 100 if total_pixels > 0 else 0.0
 
-    diff_highlight = np_img_b.copy()
-    diff_highlight[np.where(diff_mask == 255)] = [255, 0, 0]
+    is_changed = difference_percentage >= DIFFERENCE_THRESHOLD_PERCENTAGE
 
-    return Image.fromarray(diff_highlight)
-
+    if is_changed:
+        diff_highlight = np_img_b.copy()
+        diff_highlight[np.where(diff_mask == 255)] = [255, 0, 0]
+        return Image.fromarray(diff_highlight), True, difference_percentage
+    else:
+        return None, False, difference_percentage
+        
 def image_to_base64(image):
     if image:
         buffered = io.BytesIO()
@@ -110,8 +100,6 @@ def check_pages():
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(uploads_dir, session_id)
     os.makedirs(session_dir, exist_ok=True)
-    
-    SESSIONS[session_id] = {'dir': session_dir}
     
     file_info_a = []
     file_info_b = []
@@ -162,6 +150,7 @@ def diff_files(session_id):
     
     results = []
     
+    # 複数ページPDF（通常チェック）のロジック
     if len(files_a_paths) == 1 and len(files_b_paths) == 1:
         print("複数ページPDFの通常チェックモードで実行します。")
         sys.stdout.flush()
@@ -187,9 +176,10 @@ def diff_files(session_id):
             img_b_exists = i < len_b
             
             status = "unchanged"
-            diff_img = None
+            diff_img_base64 = None
             img_a = None
             img_b = None
+            diff_percentage = 0.0
 
             if not img_a_exists:
                 status = "added"
@@ -200,25 +190,25 @@ def diff_files(session_id):
             else:
                 img_a = images_a[i]
                 img_b = images_b[i]
-                diff_img = get_diff_image(img_a, img_b)
-                diff_array = np.array(diff_img)
-                if np.sum(diff_array) > 0:
+                diff_img, is_changed, diff_percentage = get_diff_image(img_a, img_b)
+                if is_changed:
                     status = "changed"
+                    diff_img_base64 = image_to_base64(diff_img)
             
             originalA_base64 = image_to_base64(img_a)
             originalB_base64 = image_to_base64(img_b)
-            diffImage_base64 = image_to_base64(diff_img)
             
             results.append({
                 "filename": f"ページ {page_number}",
                 "status": status,
                 "originalA": originalA_base64,
                 "originalB": originalB_base64,
-                "diffImage": diffImage_base64
+                "diffImage": diff_img_base64
             })
-            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}")
+            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.2f}%")
             sys.stdout.flush()
     
+    # 複数ファイル（レアケース）のロジック
     else:
         print("複数ファイルのレアケースチェックモードで実行します。")
         sys.stdout.flush()
@@ -239,29 +229,30 @@ def diff_files(session_id):
             img_b = get_images(path_b)[0] if path_b and get_images(path_b) else None
             
             status = "unchanged"
-            diff_img = None
-
+            diff_img_base64 = None
+            diff_percentage = 0.0
+            
             if not img_a:
                 status = "added"
             elif not img_b:
                 status = "removed"
             else:
-                diff_img = get_diff_image(img_a, img_b)
-                diff_array = np.array(diff_img)
-                status = "changed" if np.sum(diff_array) > 0 else "unchanged"
-
+                diff_img, is_changed, diff_percentage = get_diff_image(img_a, img_b)
+                if is_changed:
+                    status = "changed"
+                    diff_img_base64 = image_to_base64(diff_img)
+            
             originalA_base64 = image_to_base64(img_a)
             originalB_base64 = image_to_base64(img_b)
-            diffImage_base64 = image_to_base64(diff_img)
             
             results.append({
                 "filename": filename,
                 "status": status,
                 "originalA": originalA_base64,
                 "originalB": originalB_base64,
-                "diffImage": diffImage_base64
+                "diffImage": diff_img_base64
             })
-            print(f"ファイル: {filename} の比較が完了しました。ステータス: {status}")
+            print(f"ファイル: {filename} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.2f}%")
             sys.stdout.flush()
 
     end_time = time.time()
@@ -273,18 +264,18 @@ def diff_files(session_id):
 
 @app.route('/api/clear_session/<session_id>', methods=['POST'])
 def clear_session(session_id):
-    if session_id in SESSIONS:
+    session_dir = os.path.join(uploads_dir, session_id)
+    if os.path.isdir(session_dir):
         try:
-            session_dir = os.path.join(uploads_dir, session_id)
-            if os.path.exists(session_dir):
-                shutil.rmtree(session_dir)
-            del SESSIONS[session_id]
-            print(f"Session {session_id} successfully cleared.")
-        except Exception as e:
+            for filename in os.listdir(session_dir):
+                os.remove(os.path.join(session_dir, filename))
+            os.rmdir(session_dir)
+            print(f"セッションID: {session_id} の一時ファイルを削除しました。")
+            return jsonify({"message": f"Session {session_id} cleared."}), 200
+        except OSError as e:
             print(f"Error clearing session {session_id}: {e}", file=sys.stderr)
-            return jsonify({'message': 'Error clearing session'}), 500
-    return jsonify({'message': 'Session cleared'})
-
+            return jsonify({"error": "Failed to clear session"}), 500
+    return jsonify({"message": "Session not found."}), 404
 
 if __name__ == '__main__':
     app.run(debug=True)

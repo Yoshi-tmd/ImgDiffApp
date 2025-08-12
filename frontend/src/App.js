@@ -439,49 +439,49 @@ function App() {
         {error && <p className="error">{error}</p>}
 
         {result && result.results && (
-          <div>
-            <div className="results-container">
-              {result.results.map((pageResult) => (
-                <div key={pageResult.filename} className="page-container">
-                  <h2>{pageResult.filename}</h2>
-                  <div className="image-set-container">
-                    <div className="image-comparison-container">
-                      <div className="image-pair">
-                        <h3>ファイルA</h3>
-                        {pageResult.originalA ? (
-                          <img src={pageResult.originalA} alt={`Original A - ${pageResult.filename}`} />
-                        ) : (
-                          <span>---</span>
-                        )}
-                      </div>
-                      <div className="image-pair">
-                        <h3>ファイルB</h3>
-                        {pageResult.originalB ? (
-                          <img src={pageResult.originalB} alt={`Original B - ${pageResult.filename}`} />
-                        ) : (
-                          <span>---</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="image-pair diff-image-pair">
-                      <h3>{getImageName(currentImageIndex[pageResult.filename] || 0)}</h3>
-                      {pageResult.status === 'changed' || pageResult.status === 'unchanged' ? (
-                        <img
-                          src={getImageSrc(pageResult, currentImageIndex[pageResult.filename] || 0)}
-                          alt={`Difference - ${pageResult.filename}`}
-                          onClick={() => handleImageClick(pageResult.filename)}
-                        />
+        <div>
+          <div className="results-container">
+            {result.results.map((pageResult) => (
+              <div key={pageResult.filename} className="page-container">
+                <h2>{pageResult.filename}</h2>
+                <div className="image-set-container">
+                  <div className="image-comparison-container">
+                    <div className="image-pair">
+                      <h3>ファイルA</h3>
+                      {pageResult.originalA ? (
+                        <img src={pageResult.originalA} alt={`Original A - ${pageResult.filename}`} />
                       ) : (
-                        <span>差分画像はありません</span>
+                        <span>---</span>
+                      )}
+                    </div>
+                    <div className="image-pair">
+                      <h3>ファイルB</h3>
+                      {pageResult.originalB ? (
+                        <img src={pageResult.originalB} alt={`Original B - ${pageResult.filename}`} />
+                      ) : (
+                        <span>---</span>
                       )}
                     </div>
                   </div>
+                  <div className="image-pair diff-image-pair">
+                    <h3>{getImageName(currentImageIndex[pageResult.filename] || 0)}</h3>
+                    {pageResult.diffImage ? (
+                      <img
+                        src={getImageSrc(pageResult, currentImageIndex[pageResult.filename] || 0)}
+                        alt={`Difference - ${pageResult.filename}`}
+                        onClick={() => handleImageClick(pageResult.filename)}
+                      />
+                    ) : (
+                      <div className="no-diff-message">差分なし</div>
+                    )}
+                  </div>
                 </div>
-              ))}
-            </div>
-            <button onClick={handleReset}>新しいチェックを開始</button>
+              </div>
+            ))}
           </div>
-        )}
+          <button onClick={handleReset}>新しいチェックを開始</button>
+        </div>
+      )}
       </header>
     </div>
   );

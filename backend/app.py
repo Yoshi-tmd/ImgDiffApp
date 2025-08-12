@@ -49,8 +49,8 @@ def get_diff_image(img_a, img_b):
 
     DIFFERENCE_THRESHOLD_PERCENTAGE = 0.005
 
-    width = max(img_a.width, img_b.width)
-    height = max(img_a.height, img_b.height)
+    width = min(img_a.width, img_b.width)
+    height = min(img_a.height, img_b.height)
 
     img_a = img_a.resize((width, height)).convert("RGB")
     img_b = img_b.resize((width, height)).convert("RGB")

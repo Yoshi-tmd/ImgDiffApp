@@ -465,6 +465,11 @@ function App() {
                   </div>
                   <div className="image-pair diff-image-pair">
                     <h3>{getImageName(currentImageIndex[pageResult.filename] || 0)}</h3>
+                    {pageResult.status === 'changed' && (
+                      <span className="diff-percentage">
+                        差異の割合: {pageResult.difference_percentage.toFixed(4)}%
+                      </span>
+                    )}
                     {pageResult.diffImage ? (
                       <img
                         src={getImageSrc(pageResult, currentImageIndex[pageResult.filename] || 0)}

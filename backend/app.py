@@ -203,9 +203,10 @@ def diff_files(session_id):
                 "status": status,
                 "originalA": originalA_base64,
                 "originalB": originalB_base64,
-                "diffImage": diff_img_base64
+                "diffImage": diff_img_base64,
+                "difference_percentage": diff_percentage
             })
-            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.2f}%")
+            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.4f}%")
             sys.stdout.flush()
     
     # 複数ファイル（レアケース）のロジック
@@ -250,9 +251,10 @@ def diff_files(session_id):
                 "status": status,
                 "originalA": originalA_base64,
                 "originalB": originalB_base64,
-                "diffImage": diff_img_base64
+                "diffImage": diff_img_base64,
+                "difference_percentage": diff_percentage
             })
-            print(f"ファイル: {filename} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.2f}%")
+            print(f"ファイル: {filename} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.4f}%")
             sys.stdout.flush()
 
     end_time = time.time()

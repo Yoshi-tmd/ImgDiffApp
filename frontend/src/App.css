@@ -118,6 +118,11 @@ button {
   flex: 1; /* 幅を均等に */
 }
 
+.image-pair h3{
+  margin-top: 30px;
+  margin-bottom: 0;
+}
+
 .image-pair img {
   max-width: 100%;
   height: auto;
@@ -128,6 +133,13 @@ button {
 
 .diff-image-pair img {
   cursor: pointer;
+}
+
+.diff-percentage {
+  font-size: 0.6em;
+  color: #888;
+  margin-bottom: 10px;
+  text-align: center;
 }
 
 .drop-area {
@@ -156,15 +168,6 @@ button {
   display: none;
 }
 
-/* .file-input-container {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 1rem;
-  flex-wrap: nowrap;
-  width: 100%;
-  max-width: 600px;
-} */
 .file-input-container {
   display: flex;
   align-items: center;
@@ -214,3 +217,4 @@ button {
 .custom-file-upload:hover {
   background-color: #303f9f;
 }
+

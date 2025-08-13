@@ -123,6 +123,7 @@ button {
   margin-bottom: 0;
 }
 
+
 .image-pair img {
   max-width: 100%;
   height: auto;
@@ -140,6 +141,33 @@ button {
   color: #888;
   margin-bottom: 10px;
   text-align: center;
+}
+
+.diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.diff-header h3 {
+  margin-left: 180px;
+  flex-grow: 1;
+  text-align: center;
+}
+
+
+.diff-mode-checkbox {
+  font-size: 0.8em;
+  color: #666;
+  display: flex;
+  align-items: center;
+  margin-top: 30px;
+  margin-bottom: 0;
+}
+
+.diff-mode-checkbox input {
+  margin-right: 5px;
 }
 
 .drop-area {

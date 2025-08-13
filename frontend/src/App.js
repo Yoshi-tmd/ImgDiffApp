@@ -2,11 +2,14 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import './App.css';
 
+// eslint-disable-next-line no-unused-vars
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://127.0.0.1:5000';
+
 function App() {
-  const [fileA, setFileA] = useState(null); // 通常チェック用
-  const [fileB, setFileB] = useState(null); // 通常チェック用
-  const [filesA, setFilesA] = useState([]); // レアケースチェック用
-  const [filesB, setFilesB] = useState([]); // レアケースチェック用
+  const [fileA, setFileA] = useState(null);
+  const [fileB, setFileB] = useState(null);
+  const [filesA, setFilesA] = useState([]);
+  const [filesB, setFilesB] = useState([]);
   
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -15,6 +18,7 @@ function App() {
   const [pageInfo, setPageInfo] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [currentImageIndex, setCurrentImageIndex] = useState({});
+  const [isDiffModeEnabled, setIsDiffModeEnabled] = useState(true);
 
   // ドラッグ＆ドロップ関連のstate
   const [isDraggingA, setIsDraggingA] = useState(false);
@@ -161,6 +165,7 @@ function App() {
     setPageInfo(null);
     setSessionId(null);
     setCurrentImageIndex({});
+    setIsDiffModeEnabled(true);
   };
   
   const handleFileAReset = () => {
@@ -182,11 +187,26 @@ function App() {
   const handleImageClick = (filename) => {
     setCurrentImageIndex(prevState => {
       const currentIndex = prevState[filename] || 0;
-      const nextIndex = (currentIndex + 1) % 3;
+      let nextIndex;
+  
+      if (isDiffModeEnabled) {
+        // 差分表示モードが有効な場合: 差分画像(0) -> ファイルA(1) -> ファイルB(2) の順
+        nextIndex = (currentIndex + 1) % 3;
+      } else {
+        // 差分表示モードが無効な場合: ファイルA(1) -> ファイルB(2) の順
+        // 現在のインデックスが差分画像(0)の場合はファイルA(1)に移動
+        if (currentIndex === 0 || currentIndex === 2) {
+          nextIndex = 1;
+        } else {
+          nextIndex = 2;
+        }
+      }
       return { ...prevState, [filename]: nextIndex };
     });
   };
 
+  // ★ 以下の2つのヘルパー関数を削除し、新しい関数に置き換えます
+  /*
   const getImageSrc = (pageResult, index) => {
     switch (index) {
       case 0:
@@ -210,6 +230,41 @@ function App() {
         return 'ファイルB';
       default:
         return '差分画像';
+    }
+  };
+  */
+
+  // ★ 新しいヘルパー関数
+  const getDisplayImageInfo = (pageResult, index) => {
+    const currentIndex = index || 0;
+
+    // 差分がない場合は常に「差分なし」メッセージ
+    if (pageResult.diffImage === null && pageResult.status === 'unchanged') {
+        return { src: null, name: '差分なし' };
+    }
+
+    if (isDiffModeEnabled) {
+        // 差分モードON
+        switch (currentIndex) {
+            case 0:
+                return { src: pageResult.diffImage, name: '差分画像' };
+            case 1:
+                return { src: pageResult.originalA, name: 'ファイルA' };
+            case 2:
+                return { src: pageResult.originalB, name: 'ファイルB' };
+            default:
+                return { src: pageResult.diffImage, name: '差分画像' };
+        }
+    } else {
+        // 差分モードOFF
+        switch (currentIndex) {
+            case 1:
+                return { src: pageResult.originalA, name: 'ファイルA' };
+            case 2:
+                return { src: pageResult.originalB, name: 'ファイルB' };
+            default: // Index 0の場合はファイルAを表示
+                return { src: pageResult.originalA, name: 'ファイルA' };
+        }
     }
   };
 
@@ -441,48 +496,69 @@ function App() {
         {result && result.results && (
         <div>
           <div className="results-container">
-            {result.results.map((pageResult) => (
-              <div key={pageResult.filename} className="page-container">
-                <h2>{pageResult.filename}</h2>
-                <div className="image-set-container">
-                  <div className="image-comparison-container">
-                    <div className="image-pair">
-                      <h3>ファイルA</h3>
-                      {pageResult.originalA ? (
-                        <img src={pageResult.originalA} alt={`Original A - ${pageResult.filename}`} />
+            {result.results.map((pageResult) => {
+              const displayInfo = getDisplayImageInfo(pageResult, currentImageIndex[pageResult.filename]);
+              
+              return (
+                <div key={pageResult.filename} className="page-container">
+                  <h2>{pageResult.filename}</h2>
+                  <div className="image-set-container">
+                    <div className="image-comparison-container">
+                      <div className="image-pair">
+                        <h3>ファイルA</h3>
+                        {pageResult.originalA ? (
+                          <img src={pageResult.originalA} alt={`Original A - ${pageResult.filename}`} />
+                        ) : (
+                          <span>---</span>
+                        )}
+                      </div>
+                      <div className="image-pair">
+                        <h3>ファイルB</h3>
+                        {pageResult.originalB ? (
+                          <img src={pageResult.originalB} alt={`Original B - ${pageResult.filename}`} />
+                        ) : (
+                          <span>---</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="image-pair diff-image-pair">
+                      <div className="diff-header">
+                        <h3 className={displayInfo.name === '差分画像' ? "diff-image-title" : ""}>
+                          {displayInfo.name}
+                        </h3>
+                        <label className="diff-mode-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={isDiffModeEnabled}
+                            onChange={() => setIsDiffModeEnabled(!isDiffModeEnabled)}
+                          />
+                          差分画像を表示
+                        </label>
+                      </div>
+                      
+                      {displayInfo.src ? (
+                        <>
+                          <img
+                            src={displayInfo.src}
+                            alt={`Comparison - ${pageResult.filename}`}
+                            onClick={() => handleImageClick(pageResult.filename)}
+                          />
+                          {displayInfo.name === '差分画像' && (
+                            <span className="diff-percentage">
+                              差異の割合: {pageResult.difference_percentage.toFixed(4)}%
+                            </span>
+                          )}
+                        </>
                       ) : (
-                        <span>---</span>
+                        <div className="no-diff-message">
+                          <span>{displayInfo.name}</span>
+                        </div>
                       )}
                     </div>
-                    <div className="image-pair">
-                      <h3>ファイルB</h3>
-                      {pageResult.originalB ? (
-                        <img src={pageResult.originalB} alt={`Original B - ${pageResult.filename}`} />
-                      ) : (
-                        <span>---</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="image-pair diff-image-pair">
-                    <h3>{getImageName(currentImageIndex[pageResult.filename] || 0)}</h3>
-                    {pageResult.status === 'changed' && (
-                      <span className="diff-percentage">
-                        差異の割合: {pageResult.difference_percentage.toFixed(4)}%
-                      </span>
-                    )}
-                    {pageResult.diffImage ? (
-                      <img
-                        src={getImageSrc(pageResult, currentImageIndex[pageResult.filename] || 0)}
-                        alt={`Difference - ${pageResult.filename}`}
-                        onClick={() => handleImageClick(pageResult.filename)}
-                      />
-                    ) : (
-                      <div className="no-diff-message">差分なし</div>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <button onClick={handleReset}>新しいチェックを開始</button>
         </div>

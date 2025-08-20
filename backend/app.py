@@ -4,6 +4,8 @@ import base64
 import sys
 import uuid
 import time
+import re
+import json
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -31,7 +33,7 @@ def get_images(path):
     if extension == '.pdf':
         try:
             # popplerのパスを適宜修正
-            poppler_path = r'C:\Program Files\poppler-24.08.0\Library\bin'
+            poppler_path = r'C:\\Program Files\\poppler-24.08.0\\Library\\bin'
             return convert_from_path(path, dpi=200, poppler_path=poppler_path)
         except Exception as e:
             print(f"PDFファイルの読み込みに失敗しました: {e}", file=sys.stderr)
@@ -75,188 +77,284 @@ def get_diff_image(img_a, img_b):
         return Image.fromarray(diff_highlight), True, difference_percentage
     else:
         return None, False, difference_percentage
-        
-def image_to_base64(image):
-    if image:
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
-        return f"data:image/png;base64,{img_str}"
-    return ""
+
+def image_to_base64(pil_image):
+    if pil_image is None:
+        return None
+    
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="JPEG")
+    return "data:image/jpeg;base64," + base64.b64encode(buffered.getvalue()).decode()
 
 @app.route('/api/check_pages', methods=['POST'])
 def check_pages():
-    print("ページチェックを開始します...")
-    sys.stdout.flush()
-
-    if 'filesA' not in request.files and 'filesB' not in request.files:
-        print("エラー: ファイルがアップロードされていません。", file=sys.stderr)
-        sys.stdout.flush()
-        return jsonify({"error": "ファイルがアップロードされていません。"}), 400
-
-    files_a = request.files.getlist('filesA') if 'filesA' in request.files else []
-    files_b = request.files.getlist('filesB') if 'filesB' in request.files else []
-    
-    session_id = str(uuid.uuid4())
-    session_dir = os.path.join(uploads_dir, session_id)
-    os.makedirs(session_dir, exist_ok=True)
-    
-    file_info_a = []
-    file_info_b = []
-    
-    for file in files_a:
-        path = os.path.join(session_dir, 'A_' + file.filename)
-        file.save(path)
-        images = get_images(path)
-        filename_without_prefix = os.path.splitext(file.filename)[0].replace('A_', '', 1)
-        file_info_a.append({"filename": filename_without_prefix, "pages": len(images)})
+    try:
+        session_id = str(uuid.uuid4())
+        session_dir = os.path.join(uploads_dir, session_id)
+        os.makedirs(session_dir, exist_ok=True)
         
-    for file in files_b:
-        path = os.path.join(session_dir, 'B_' + file.filename)
-        file.save(path)
-        images = get_images(path)
-        filename_without_prefix = os.path.splitext(file.filename)[0].replace('B_', '', 1)
-        file_info_b.append({"filename": filename_without_prefix, "pages": len(images)})
+        uploaded_files_a = {}
+        uploaded_files_b = {}
+        
+        file_list_a = []
+        if 'filesA' in request.files:
+            files_a = request.files.getlist('filesA')
+            for file in files_a:
+                filename = file.filename
+                file_path = os.path.join(session_dir, filename)
+                file.save(file_path)
+                uploaded_files_a[filename] = file_path
+            file_list_a = sorted(uploaded_files_a.keys())
 
-    print("ページチェックが完了しました。セッションID:", session_id)
-    sys.stdout.flush()
+        file_list_b = []
+        if 'filesB' in request.files:
+            files_b = request.files.getlist('filesB')
+            for file in files_b:
+                filename = file.filename
+                file_path = os.path.join(session_dir, filename)
+                file.save(file_path)
+                uploaded_files_b[filename] = file_path
+            file_list_b = sorted(uploaded_files_b.keys())
+        
+        print("--- アップロードされたファイルAグループ（ファイル名順）---")
+        for filename in file_list_a:
+            print(filename)
+        print("------------------------------------------")
 
-    return jsonify({
-        "sessionId": session_id,
-        "filesA": file_info_a,
-        "filesB": file_info_b
-    })
+        print("--- アップロードされたファイルBグループ（ファイル名順）---")
+        for filename in file_list_b:
+            print(filename)
+        print("------------------------------------------")
+
+        # 通常チェック（PDF）
+        if len(file_list_a) == 1 and len(file_list_b) == 1 and not request.form.get('fileListA'):
+            filename_a = file_list_a[0]
+            filename_b = file_list_b[0]
+            
+            # ページ数を取得して返却
+            pages_a = 0
+            if filename_a.lower().endswith('.pdf'):
+                pages_a = len(convert_from_path(uploaded_files_a[filename_a], poppler_path=r'C:\\Program Files\\poppler-24.08.0\\Library\\bin'))
+            
+            pages_b = 0
+            if filename_b.lower().endswith('.pdf'):
+                pages_b = len(convert_from_path(uploaded_files_b[filename_b], poppler_path=r'C:\\Program Files\\poppler-24.08.0\\Library\\bin'))
+
+            # セッション情報を保存
+            with open(os.path.join(session_dir, 'session_info.json'), 'w') as f:
+                json.dump({
+                    "type": "normal",
+                    "filesA": uploaded_files_a,
+                    "filesB": uploaded_files_b,
+                    "sorted_filenames": {"A": file_list_a, "B": file_list_b},
+                    "cached_results": {}
+                }, f)
+            
+            return jsonify({
+                "sessionId": session_id,
+                "filesA": [{"filename": filename_a, "pages": pages_a}],
+                "filesB": [{"filename": filename_b, "pages": pages_b}]
+            })
+            
+        # 複数ファイルをアップロードし、手動ペアリングリストがない場合
+        elif (len(file_list_a) > 1 or len(file_list_b) > 1) and not request.form.get('fileListA'):
+            # 自動的にファイル名順でペアリングリストを作成
+            max_len = max(len(file_list_a), len(file_list_b))
+            pairing_list = []
+            for i in range(max_len):
+                pairing_list.append({
+                    "filenameA": file_list_a[i] if i < len(file_list_a) else None,
+                    "filenameB": file_list_b[i] if i < len(file_list_b) else None
+                })
+            
+            # セッション情報を保存
+            with open(os.path.join(session_dir, 'session_info.json'), 'w') as f:
+                json.dump({
+                    "type": "manual",
+                    "filesA": uploaded_files_a,
+                    "filesB": uploaded_files_b,
+                    "pairing_list": pairing_list,
+                    "cached_results": {}
+                }, f)
+
+            return jsonify({
+                "sessionId": session_id,
+                "filesA": [{"filename": f, "pages": 1} for f in file_list_a],
+                "filesB": [{"filename": f, "pages": 1} for f in file_list_b]
+            })
+
+        # 手動ペアリングチェック（複数ファイル）
+        elif 'fileListA' in request.form and 'fileListB' in request.form:
+            file_list_a_form = [f.strip() for f in request.form.get('fileListA').split('\n') if f.strip()]
+            file_list_b_form = [f.strip() for f in request.form.get('fileListB').split('\n') if f.strip()]
+            
+            # ペアリングリストを作成
+            max_len = max(len(file_list_a_form), len(file_list_b_form))
+            pairing_list = []
+            for i in range(max_len):
+                pairing_list.append({
+                    "filenameA": file_list_a_form[i] if i < len(file_list_a_form) else None,
+                    "filenameB": file_list_b_form[i] if i < len(file_list_b_form) else None
+                })
+            
+            # セッション情報を保存
+            with open(os.path.join(session_dir, 'session_info.json'), 'w') as f:
+                json.dump({
+                    "type": "manual",
+                    "filesA": uploaded_files_a,
+                    "filesB": uploaded_files_b,
+                    "pairing_list": pairing_list,
+                    "cached_results": {}
+                }, f)
+
+            return jsonify({
+                "sessionId": session_id,
+                "filesA": [{"filename": f, "pages": 1} for f in file_list_a],
+                "filesB": [{"filename": f, "pages": 1} for f in file_list_b]
+            })
+            
+        else:
+            return jsonify({"error": "不適切なファイルグループです。"}), 400
+
+    except Exception as e:
+        print(f"エラーが発生しました: {e}", file=sys.stderr)
+        return jsonify({"error": "サーバー側でエラーが発生しました。"}), 500
 
 @app.route('/api/diff/<session_id>', methods=['GET'])
-def diff_files(session_id):
-    print(f"セッションID: {session_id} の差分チェックを開始します...")
-    sys.stdout.flush()
+def diff_check(session_id):
     start_time = time.time()
-
     session_dir = os.path.join(uploads_dir, session_id)
+
     if not os.path.isdir(session_dir):
-        print("エラー: セッションIDが見つかりません。", file=sys.stderr)
-        sys.stdout.flush()
-        return jsonify({"error": "セッションIDが見つかりません。"}), 404
-    
-    files = os.listdir(session_dir)
-    if not files:
-        print("エラー: 差分チェック用のファイルが見つかりません。", file=sys.stderr)
-        sys.stdout.flush()
-        return jsonify({"error": "差分チェック用のファイルが見つかりません。"}), 404
+        return jsonify({"error": "セッションが見つかりません。"}), 404
 
-    files_a_paths = sorted([os.path.join(session_dir, f) for f in files if f.startswith('A_')])
-    files_b_paths = sorted([os.path.join(session_dir, f) for f in files if f.startswith('B_')])
-    
+    try:
+        with open(os.path.join(session_dir, 'session_info.json'), 'r') as f:
+            session_info = json.load(f)
+    except FileNotFoundError:
+        return jsonify({"error": "セッション情報ファイルが見つかりません。"}), 404
+
     results = []
-    
-    # 複数ページPDF（通常チェック）のロジック
-    if len(files_a_paths) == 1 and len(files_b_paths) == 1:
-        print("複数ページPDFの通常チェックモードで実行します。")
-        sys.stdout.flush()
 
-        images_a = get_images(files_a_paths[0])
-        images_b = get_images(files_b_paths[0])
-        len_a = len(images_a)
-        len_b = len(images_b)
-
-        if not images_a and not images_b:
-            print("エラー: 画像ファイルの読み込みに問題が発生しました。", file=sys.stderr)
-            sys.stdout.flush()
-            return jsonify({"error": "画像ファイルの読み込みに問題が発生しました。"}), 500
-
-        num_pages = max(len_a, len_b)
+    if session_info["type"] == "normal":
+        # ソートされたファイル名リストを使用
+        filename_a = session_info["sorted_filenames"]["A"][0]
+        filename_b = session_info["sorted_filenames"]["B"][0]
+        path_a = session_info["filesA"][filename_a]
+        path_b = session_info["filesB"][filename_b]
         
-        for i in range(num_pages):
-            page_number = i + 1
-            print(f"ページ {page_number} の処理を開始します...")
-            sys.stdout.flush()
+        images_a = get_images(path_a)
+        images_b = get_images(path_b)
 
-            img_a_exists = i < len_a
-            img_b_exists = i < len_b
+        if len(images_a) != len(images_b):
+            return jsonify({"error": "PDFのページ数が異なります。"}), 400
+
+        for i in range(len(images_a)):
+            img_a = images_a[i]
+            img_b = images_b[i]
+            key = f"normal_p{i+1}"
             
-            status = "unchanged"
-            diff_img_base64 = None
-            img_a = None
-            img_b = None
-            diff_percentage = 0.0
-
-            if not img_a_exists:
-                status = "added"
-                img_b = images_b[i]
-            elif not img_b_exists:
-                status = "removed"
-                img_a = images_a[i]
+            if key in session_info.get("cached_results", {}):
+                cached_data = session_info["cached_results"][key]
+                diff_img_base64 = cached_data["diffImage"]
+                originalA_base64 = cached_data["originalA"]
+                originalB_base64 = cached_data["originalB"]
+                status = cached_data["status"]
+                diff_percentage = cached_data["difference_percentage"]
             else:
-                img_a = images_a[i]
-                img_b = images_b[i]
                 diff_img, is_changed, diff_percentage = get_diff_image(img_a, img_b)
-                if is_changed:
-                    status = "changed"
-                    diff_img_base64 = image_to_base64(diff_img)
-            
-            originalA_base64 = image_to_base64(img_a)
-            originalB_base64 = image_to_base64(img_b)
+                status = 'changed' if is_changed else 'unchanged'
+                diff_img_base64 = image_to_base64(diff_img)
+                originalA_base64 = image_to_base64(img_a)
+                originalB_base64 = image_to_base64(img_b)
+
+                # 結果をキャッシュに保存
+                session_info.setdefault("cached_results", {})[key] = {
+                    "diffImage": diff_img_base64,
+                    "originalA": originalA_base64,
+                    "originalB": originalB_base64,
+                    "status": status,
+                    "difference_percentage": diff_percentage
+                }
+                # ファイルに書き戻す
+                with open(os.path.join(session_dir, 'session_info.json'), 'w') as f:
+                    json.dump(session_info, f, indent=4)
             
             results.append({
-                "filename": f"ページ {page_number}",
+                "filename": f"p{i+1}",
+                "pagenum": f"p{i+1}",
                 "status": status,
                 "originalA": originalA_base64,
                 "originalB": originalB_base64,
                 "diffImage": diff_img_base64,
                 "difference_percentage": diff_percentage
             })
-            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.4f}%")
+            print(f"ファイル: p{i+1} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.4f}%")
             sys.stdout.flush()
-    
-    # 複数ファイル（レアケース）のロジック
-    else:
-        print("複数ファイルのレアケースチェックモードで実行します。")
-        sys.stdout.flush()
 
-        dict_a = {os.path.splitext(os.path.basename(f))[0].replace('A_', '', 1): f for f in files_a_paths}
-        dict_b = {os.path.splitext(os.path.basename(f))[0].replace('B_', '', 1): f for f in files_b_paths}
-
-        all_filenames = sorted(list(set(dict_a.keys()) | set(dict_b.keys())))
+    elif session_info["type"] == "manual":
+        uploaded_files_a = session_info["filesA"]
+        uploaded_files_b = session_info["filesB"]
         
-        for filename in all_filenames:
-            print(f"ファイル: {filename} の比較を開始します...")
-            sys.stdout.flush()
+        for pair in session_info["pairing_list"]:
+            filename_a = pair.get("filenameA")
+            filename_b = pair.get("filenameB")
+            key = f"manual_{filename_a or filename_b}"
 
-            path_a = dict_a.get(filename)
-            path_b = dict_b.get(filename)
-
-            img_a = get_images(path_a)[0] if path_a and get_images(path_a) else None
-            img_b = get_images(path_b)[0] if path_b and get_images(path_b) else None
-            
-            status = "unchanged"
-            diff_img_base64 = None
-            diff_percentage = 0.0
-            
-            if not img_a:
-                status = "added"
-            elif not img_b:
-                status = "removed"
+            if key in session_info.get("cached_results", {}):
+                cached_data = session_info["cached_results"][key]
+                diff_img_base64 = cached_data["diffImage"]
+                originalA_base64 = cached_data["originalA"]
+                originalB_base64 = cached_data["originalB"]
+                status = cached_data["status"]
+                diff_percentage = cached_data["difference_percentage"]
             else:
-                diff_img, is_changed, diff_percentage = get_diff_image(img_a, img_b)
-                if is_changed:
-                    status = "changed"
+                path_a = uploaded_files_a.get(filename_a) if filename_a and filename_a != '---' else None
+                path_b = uploaded_files_b.get(filename_b) if filename_b and filename_b != '---' else None
+
+                img_a = get_images(path_a)[0] if path_a else None
+                img_b = get_images(path_b)[0] if path_b else None
+
+                status = 'changed'
+                diff_img_base64 = None
+                diff_percentage = 0.0
+
+                if img_a and img_b:
+                    diff_img, is_changed, diff_percentage = get_diff_image(img_a, img_b)
+                    status = 'changed' if is_changed else 'unchanged'
                     diff_img_base64 = image_to_base64(diff_img)
-            
-            originalA_base64 = image_to_base64(img_a)
-            originalB_base64 = image_to_base64(img_b)
-            
+                elif img_a:
+                    status = 'missing_b'
+                elif img_b:
+                    status = 'missing_a'
+                
+                originalA_base64 = image_to_base64(img_a)
+                originalB_base64 = image_to_base64(img_b)
+
+                # 結果をキャッシュに保存
+                session_info.setdefault("cached_results", {})[key] = {
+                    "diffImage": diff_img_base64,
+                    "originalA": originalA_base64,
+                    "originalB": originalB_base64,
+                    "status": status,
+                    "difference_percentage": diff_percentage
+                }
+                # ファイルに書き戻す
+                with open(os.path.join(session_dir, 'session_info.json'), 'w') as f:
+                    json.dump(session_info, f, indent=4)
+
+
             results.append({
-                "filename": filename,
+                "filename": filename_a if filename_a else filename_b,
                 "status": status,
                 "originalA": originalA_base64,
                 "originalB": originalB_base64,
                 "diffImage": diff_img_base64,
                 "difference_percentage": diff_percentage
             })
-            print(f"ファイル: {filename} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.4f}%")
+            print(f"ファイル: {filename_a if filename_a else filename_b} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.4f}%")
             sys.stdout.flush()
-
+    
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"すべての差分チェックが完了しました。所要時間: {elapsed_time:.2f}秒")
@@ -273,11 +371,12 @@ def clear_session(session_id):
                 os.remove(os.path.join(session_dir, filename))
             os.rmdir(session_dir)
             print(f"セッションID: {session_id} の一時ファイルを削除しました。")
-            return jsonify({"message": f"Session {session_id} cleared."}), 200
-        except OSError as e:
+            return jsonify({"message": f"Session {session_id} cleared successfully."}), 200
+        except Exception as e:
             print(f"Error clearing session {session_id}: {e}", file=sys.stderr)
-            return jsonify({"error": "Failed to clear session"}), 500
-    return jsonify({"message": "Session not found."}), 404
+            return jsonify({"error": "Failed to clear session."}), 500
+    else:
+        return jsonify({"message": "Session not found."}), 404
 
 if __name__ == '__main__':
     app.run(debug=True)

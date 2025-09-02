@@ -64,7 +64,7 @@ function App() {
     formData.append('filesB', fileB);
 
     try {
-      const response = await axios.post('http://127.0.0.1:5000/api/check_pages', formData, {
+      const response = await axios.post(`${API_BASE_URL}/api/check_pages`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -72,7 +72,7 @@ function App() {
       const currentSessionId = response.data.sessionId;
       setSessionId(currentSessionId);
       
-      const diffResponse = await axios.get(`http://127.0.0.1:5000/api/diff/${currentSessionId}`);
+      const diffResponse = await axios.get(`${API_BASE_URL}/api/diff/${currentSessionId}`);
       setResult(diffResponse.data);
       setStatus('差分チェックが完了しました。');
     } catch (err) {
@@ -110,7 +110,7 @@ function App() {
     }
 
     try {
-      const response = await axios.post('http://127.0.0.1:5000/api/check_pages', formData, {
+      const response = await axios.post(`${API_BASE_URL}/api/check_pages`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -133,7 +133,7 @@ function App() {
     setStatus('差分チェックを開始します...');
     
     try {
-      const response = await axios.get(`http://127.0.0.1:5000/api/diff/${sessionId}`);
+      const response = await axios.get(`${API_BASE_URL}/api/diff/${sessionId}`);
       setResult(response.data);
       setStatus('差分チェックが完了しました。');
     } catch (err) {
@@ -149,7 +149,7 @@ function App() {
     // 既存のセッションIDがあればバックエンドに削除リクエストを送る
     if (sessionId) {
       try {
-        await axios.post(`http://127.0.0.1:5000/api/clear_session/${sessionId}`);
+        await axios.post(`${API_BASE_URL}/api/clear_session/${sessionId}`);
       } catch (error) {
         console.error('Error clearing session:', error);
       }
@@ -205,36 +205,6 @@ function App() {
     });
   };
 
-  // ★ 以下の2つのヘルパー関数を削除し、新しい関数に置き換えます
-  /*
-  const getImageSrc = (pageResult, index) => {
-    switch (index) {
-      case 0:
-        return pageResult.diffImage || '';
-      case 1:
-        return pageResult.originalA || '';
-      case 2:
-        return pageResult.originalB || '';
-      default:
-        return pageResult.diffImage || '';
-    }
-  };
-
-  const getImageName = (index) => {
-    switch (index) {
-      case 0:
-        return '差分画像';
-      case 1:
-        return 'ファイルA';
-      case 2:
-        return 'ファイルB';
-      default:
-        return '差分画像';
-    }
-  };
-  */
-
-  // ★ 新しいヘルパー関数
   const getDisplayImageInfo = (pageResult, index) => {
     const currentIndex = index || 0;
 
@@ -326,6 +296,19 @@ function App() {
       setFilesB(e.dataTransfer.files);
       setIsDraggingFilesB(false);
     }
+  };
+
+  // 数値を考慮した自然順ソート（"p9" < "p10" などを正しく）
+  const naturalCompare = (a, b) => {
+    const ax = a.toLowerCase().split(/(\d+)/).map(s => (/\d+/.test(s) ? Number(s) : s));
+    const bx = b.toLowerCase().split(/(\d+)/).map(s => (/\d+/.test(s) ? Number(s) : s));
+    for (let i = 0; i < Math.max(ax.length, bx.length); i++) {
+      if (ax[i] === undefined) return -1;
+      if (bx[i] === undefined) return 1;
+      if (ax[i] === bx[i]) continue;
+      return ax[i] < bx[i] ? -1 : 1;
+    }
+    return 0;
   };
 
   return (
@@ -456,29 +439,41 @@ function App() {
         {/* レアケース用ページリスト */}
         {pageInfo && !result && (
           <div>
-            <h2>ページリスト</h2>
+            <h2>アップロード確認</h2>
             <div className="page-check-container">
               <div className="page-check-group list-group-a">
-                <h3>ファイルAグループ</h3>
-                <ul>
-                  {Array.from(new Set([...pageInfo.filesA.map(f => f.filename), ...pageInfo.filesB.map(f => f.filename)]))
-                    .sort()
-                    .map((filename, i) => {
-                      const fileAInfo = pageInfo.filesA.find(f => f.filename === filename);
-                      return <li key={`A-${i}`}>{fileAInfo ? `${fileAInfo.filename}` : '---'}</li>;
-                    })}
-                </ul>
+                {(() => {
+                  const namesA = (pageInfo.fileNamesA && pageInfo.fileNamesA.length
+                    ? [...pageInfo.fileNamesA]
+                    : (pageInfo.filesA || []).map(f => f.filename)
+                  ).sort(naturalCompare);
+                  const countA = typeof pageInfo.groupFileCountA === 'number' ? pageInfo.groupFileCountA : namesA.length;
+                  return (
+                    <>
+                      <h3>ファイルAグループ（{countA}件）</h3>
+                      <ul>
+                        {namesA.length === 0 ? <li>---</li> : namesA.map((name, i) => <li key={`A-${i}`}>{name}</li>)}
+                      </ul>
+                    </>
+                  );
+                })()}
               </div>
               <div className="page-check-group list-group-b">
-                <h3>ファイルBグループ</h3>
-                <ul>
-                  {Array.from(new Set([...pageInfo.filesA.map(f => f.filename), ...pageInfo.filesB.map(f => f.filename)]))
-                    .sort()
-                    .map((filename, i) => {
-                      const fileBInfo = pageInfo.filesB.find(f => f.filename === filename);
-                      return <li key={`B-${i}`}>{fileBInfo ? `${fileBInfo.filename}` : '---'}</li>;
-                    })}
-                </ul>
+                {(() => {
+                  const namesB = (pageInfo.fileNamesB && pageInfo.fileNamesB.length
+                    ? [...pageInfo.fileNamesB]
+                    : (pageInfo.filesB || []).map(f => f.filename)
+                  ).sort(naturalCompare);
+                  const countB = typeof pageInfo.groupFileCountB === 'number' ? pageInfo.groupFileCountB : namesB.length;
+                  return (
+                    <>
+                      <h3>ファイルBグループ（{countB}件）</h3>
+                      <ul>
+                        {namesB.length === 0 ? <li>---</li> : namesB.map((name, i) => <li key={`B-${i}`}>{name}</li>)}
+                      </ul>
+                    </>
+                  );
+                })()}
               </div>
             </div>
             <button onClick={handleRareCaseDiffCheck} disabled={loading}>

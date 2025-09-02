@@ -251,13 +251,28 @@ def check_pages():
     print("ページチェックを開始します...")
     sys.stdout.flush()
 
-    if 'filesA' not in request.files and 'filesB' not in request.files:
+    # === [UPLOAD UNIFIED] 入口統一：filesA/filesB に加えて files でも受付 ===
+    has_any = ('filesA' in request.files) or ('filesB' in request.files) or ('files' in request.files)
+    if not has_any:
         print("エラー: ファイルがアップロードされていません。", file=sys.stderr)
         sys.stdout.flush()
         return jsonify({"error": "ファイルがアップロードされていません。"}), 400
 
     files_a = request.files.getlist('filesA') if 'filesA' in request.files else []
     files_b = request.files.getlist('filesB') if 'filesB' in request.files else []
+
+    # 単一フィールド 'files' で来た場合は A_/B_ 接頭辞で振り分け
+    unknown_group = []
+    if 'files' in request.files:
+        mixed = request.files.getlist('files')
+        for f in mixed:
+            fname = f.filename or ""
+            if fname.startswith('A_'):
+                files_a.append(f)
+            elif fname.startswith('B_'):
+                files_b.append(f)
+            else:
+                unknown_group.append(fname)  # 判別不可→警告リストへ
 
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(uploads_dir, session_id)
@@ -271,12 +286,11 @@ def check_pages():
         path = os.path.join(session_dir, 'B_' + file.filename)
         file.save(path)
 
-    # === [CONFIRM VIEW] ここから「確認表示」向けの情報を作成（自然順＆ファイル数） ===
+    # === [CONFIRM VIEW] 確認表示用の情報（自然順＆ファイル数）
     all_files = os.listdir(session_dir)
     files_a_paths = sorted([os.path.join(session_dir, f) for f in all_files if f.startswith('A_')], key=natural_key)
     files_b_paths = sorted([os.path.join(session_dir, f) for f in all_files if f.startswith('B_')], key=natural_key)
 
-    # ファイル名（A_/B_ 接頭辞を外した見せ名）とページ数を計測（軽量版）
     file_info_a = []
     file_names_a = []
     for p in files_a_paths:
@@ -293,18 +307,24 @@ def check_pages():
         file_info_b.append({"filename": show, "pages": pages})
         file_names_b.append(show)
 
-    # 返却：従来の filesA/filesB（ページ数つき）に加えて、「件数」と「ファイル名だけの配列」も返す
+    # === [VALIDATION] 軽い運用チェック（任意）
+    issues = []
+    if unknown_group:
+        issues.append("A_/B_ の接頭辞で判別できないファイルがあります: " + ", ".join(unknown_group))
+
     print("ページチェックが完了しました。セッションID:", session_id)
     sys.stdout.flush()
 
     return jsonify({
         "sessionId": session_id,
-        "filesA": file_info_a,                 # 従来互換：各ファイルのページ数つき
-        "filesB": file_info_b,                 # 従来互換：各ファイルのページ数つき
-        "groupFileCountA": len(file_info_a),   # === [CONFIRM VIEW] 追加：Aのファイル数
-        "groupFileCountB": len(file_info_b),   # === [CONFIRM VIEW] 追加：Bのファイル数
-        "fileNamesA": file_names_a,            # === [CONFIRM VIEW] 追加：表示用ファイル名リスト（自然順）
-        "fileNamesB": file_names_b             # === [CONFIRM VIEW] 追加：表示用ファイル名リスト（自然順）
+        "filesA": file_info_a,
+        "filesB": file_info_b,
+        "groupFileCountA": len(file_info_a),
+        "groupFileCountB": len(file_info_b),
+        "fileNamesA": file_names_a,
+        "fileNamesB": file_names_b,
+        "uploadIssues": issues,            # 追加：警告の配列
+        "isValidPattern": len(issues) == 0 # 追加：推奨パターンかどうか
     })
 
 @app.route('/api/diff/<session_id>', methods=['GET'])
@@ -331,192 +351,131 @@ def diff_files(session_id):
 
     results = []
 
-    # -----------------------------
-    # 複数ページPDF（通常チェック）
-    # -----------------------------
-    if len(files_a_paths) == 1 and len(files_b_paths) == 1:
-        print("複数ページPDFの通常チェックモードで実行します。")
+    # =============================
+    # === [UNIFIED ALIGN] 常にレアケース・フローで処理 =============================
+    # =============================
+    print("レアケース（アライメント）方式で実行します。")
+    sys.stdout.flush()
+
+    def load_group(paths, prefix):
+        """
+        各ファイルの全ページを展開し、[(label, PIL)] を返す。
+        label は '元ファイル名'（ページサフィックスは付けない）。
+        """
+        items = []
+        for p in paths:
+            base = os.path.basename(p)
+            orig = base.replace(f"{prefix}_", "", 1)
+            imgs = get_images(p)  # 一度だけ読む
+            for _idx, im in enumerate(imgs, start=1):
+                label = f"{orig}"  # ファイル名のみ
+                items.append((label, im))
+        return items
+
+    groupA = load_group(files_a_paths, "A")
+    groupB = load_group(files_b_paths, "B")
+
+    pagesA = [im for (_, im) in groupA]
+    pagesB = [im for (_, im) in groupB]
+
+    if len(pagesA) == 0 and len(pagesB) == 0:
+        print("エラー: 画像ファイルの読み込みに問題が発生しました。", file=sys.stderr)
         sys.stdout.flush()
+        return jsonify({"error": "画像ファイルの読み込みに問題が発生しました。"}), 500
 
-        images_a = get_images(files_a_paths[0])
-        images_b = get_images(files_b_paths[0])
-        len_a = len(images_a)
-        len_b = len(images_b)
-
-        if not images_a and not images_b:
-            print("エラー: 画像ファイルの読み込みに問題が発生しました。", file=sys.stderr)
-            sys.stdout.flush()
-            return jsonify({"error": "画像ファイルの読み込みに問題が発生しました。"}), 500
-
-        num_pages = max(len_a, len_b)
-
-        for i in range(num_pages):
-            page_number = i + 1
-            print(f"ページ {page_number} の処理を開始します...")
-            sys.stdout.flush()
-
-            img_a_exists = i < len_a
-            img_b_exists = i < len_b
-
-            status = "unchanged"
-            diff_img_base64 = None
-            img_a = None
-            img_b = None
-            diff_percentage = 0.0
-
-            if not img_a_exists:
-                status = "added"
-                img_b = images_b[i]
-            elif not img_b_exists:
-                status = "removed"
-                img_a = images_a[i]
-            else:
-                img_a = images_a[i]
-                img_b = images_b[i]
-                diff_img, is_changed, diff_percentage = get_diff_image(img_a, img_b)
-                if is_changed:
-                    status = "changed"
-                    diff_img_base64 = image_to_base64(diff_img)
-
-            originalA_base64 = image_to_base64(img_a)
-            originalB_base64 = image_to_base64(img_b)
-
+    if len(pagesA) == 0:
+        for j, (labelB, imB) in enumerate(groupB):
             results.append({
-                "filename": f"ページ {page_number}",
+                "filename": labelB,
+                "status": "added",
+                "originalA": "",
+                "originalB": image_to_base64(imB),
+                "diffImage": None,
+                "difference_percentage": 0.0
+            })
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"すべての差分チェックが完了しました。所要時間: {elapsed_time:.2f}秒")
+        sys.stdout.flush()
+        return jsonify({"results": results})
+
+    if len(pagesB) == 0:
+        for i, (labelA, imA) in enumerate(groupA):
+            results.append({
+                "filename": labelA,
+                "status": "removed",
+                "originalA": image_to_base64(imA),
+                "originalB": "",
+                "diffImage": None,
+                "difference_percentage": 0.0
+            })
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"すべての差分チェックが完了しました。所要時間: {elapsed_time:.2f}秒")
+        sys.stdout.flush()
+        return jsonify({"results": results})
+
+    # 進捗ログ：コスト行列
+    print(f"[Rare] Building cost matrix... A:{len(pagesA)} pages, B:{len(pagesB)} pages")
+    sys.stdout.flush()
+    C = _build_cost_matrix(pagesA, pagesB, hash_size=32, down=256, w_hash=0.5, w_ssim=0.5, diag_bias=0.01)
+    print(f"[Rare] Cost matrix built: shape={C.shape}")
+    sys.stdout.flush()
+
+    # アライメント
+    print("[Rare] Aligning (affine-gap DP)...")
+    sys.stdout.flush()
+    # ページ数が極端に多い場合は band を適宜広げる/狭めるとパフォーマンス調整可能
+    pairs = _align_affine(C, gap_open=0.15, gap_extend=0.02, band=10)
+    print(f"[Rare] Alignment done. pairs={len(pairs)}")
+    sys.stdout.flush()
+
+    # ペアごとの進捗
+    total_pairs = len(pairs)
+    for idx, pair in enumerate(pairs, start=1):
+        ai, bj = pair
+        if ai is None and bj is not None:
+            labelB, imB = groupB[bj]
+            status = "added"
+            diff_percentage = 0.0
+            results.append({
+                "filename": labelB,
                 "status": status,
-                "originalA": originalA_base64,
-                "originalB": originalB_base64,
-                "diffImage": diff_img_base64,
+                "originalA": "",
+                "originalB": image_to_base64(imB),
+                "diffImage": None,
+                "difference_percentage": 0.0
+            })
+        elif bj is None and ai is not None:
+            labelA, imA = groupA[ai]
+            status = "removed"
+            diff_percentage = 0.0
+            results.append({
+                "filename": labelA,
+                "status": status,
+                "originalA": image_to_base64(imA),
+                "originalB": "",
+                "diffImage": None,
+                "difference_percentage": 0.0
+            })
+        else:
+            labelA, imA = groupA[ai]
+            labelB, imB = groupB[bj]
+            diff_img, is_changed, diff_percentage = get_diff_image(imA, imB)
+            status = "changed" if is_changed else "unchanged"
+            results.append({
+                "filename": f"{labelA} ↔ {labelB}",
+                "status": status,
+                "originalA": image_to_base64(imA),
+                "originalB": image_to_base64(imB),
+                "diffImage": image_to_base64(diff_img) if is_changed else None,
                 "difference_percentage": diff_percentage
             })
-            print(f"ページ {page_number} の比較が完了しました。ステータス: {status}, 差異の割合: {diff_percentage:.6f}%")
-            sys.stdout.flush()
 
-    # -----------------------------
-    # 複数ファイル（レアケース）
-    # -----------------------------
-    else:
-        print("複数ファイルのレアケースチェックモードで実行します。")
+        left = ("" if ai is None else groupA[ai][0])
+        right = ("" if bj is None else groupB[bj][0])
+        print(f"[Rare] Progress {idx}/{total_pairs} : {status}  {left}  ↔  {right} | diff={diff_percentage:.6f}%")
         sys.stdout.flush()
-
-        def load_group(paths, prefix):
-            """
-            各ファイルの全ページを展開し、[(label, PIL)] を返す。
-            label は '元ファイル名'（ページサフィックスは付けない）。
-            """
-            items = []
-            for p in paths:
-                base = os.path.basename(p)
-                orig = base.replace(f"{prefix}_", "", 1)
-                imgs = get_images(p)  # 一度だけ読む
-                for _idx, im in enumerate(imgs, start=1):
-                    label = f"{orig}"  # ファイル名のみ
-                    items.append((label, im))
-            return items
-
-        groupA = load_group(files_a_paths, "A")
-        groupB = load_group(files_b_paths, "B")
-
-        pagesA = [im for (_, im) in groupA]
-        pagesB = [im for (_, im) in groupB]
-
-        if len(pagesA) == 0 and len(pagesB) == 0:
-            print("エラー: 画像ファイルの読み込みに問題が発生しました。", file=sys.stderr)
-            sys.stdout.flush()
-            return jsonify({"error": "画像ファイルの読み込みに問題が発生しました。"}), 500
-
-        if len(pagesA) == 0:
-            for j, (labelB, imB) in enumerate(groupB):
-                results.append({
-                    "filename": labelB,
-                    "status": "added",
-                    "originalA": "",
-                    "originalB": image_to_base64(imB),
-                    "diffImage": None,
-                    "difference_percentage": 0.0
-                })
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            print(f"すべての差分チェックが完了しました。所要時間: {elapsed_time:.2f}秒")
-            sys.stdout.flush()
-            return jsonify({"results": results})
-
-        if len(pagesB) == 0:
-            for i, (labelA, imA) in enumerate(groupA):
-                results.append({
-                    "filename": labelA,
-                    "status": "removed",
-                    "originalA": image_to_base64(imA),
-                    "originalB": "",
-                    "diffImage": None,
-                    "difference_percentage": 0.0
-                })
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            print(f"すべての差分チェックが完了しました。所要時間: {elapsed_time:.2f}秒")
-            sys.stdout.flush()
-            return jsonify({"results": results})
-
-        # 進捗ログ：コスト行列
-        print(f"[Rare] Building cost matrix... A:{len(pagesA)} pages, B:{len(pagesB)} pages")
-        sys.stdout.flush()
-        C = _build_cost_matrix(pagesA, pagesB, hash_size=32, down=256, w_hash=0.5, w_ssim=0.5, diag_bias=0.01)
-        print(f"[Rare] Cost matrix built: shape={C.shape}")
-        sys.stdout.flush()
-
-        # アライメント
-        print("[Rare] Aligning (affine-gap DP)...")
-        sys.stdout.flush()
-        pairs = _align_affine(C, gap_open=0.15, gap_extend=0.02, band=10)
-        print(f"[Rare] Alignment done. pairs={len(pairs)}")
-        sys.stdout.flush()
-
-        # ペアごとの進捗
-        total_pairs = len(pairs)
-        for idx, pair in enumerate(pairs, start=1):
-            ai, bj = pair
-            if ai is None and bj is not None:
-                labelB, imB = groupB[bj]
-                status = "added"
-                diff_percentage = 0.0
-                results.append({
-                    "filename": labelB,
-                    "status": status,
-                    "originalA": "",
-                    "originalB": image_to_base64(imB),
-                    "diffImage": None,
-                    "difference_percentage": 0.0
-                })
-            elif bj is None and ai is not None:
-                labelA, imA = groupA[ai]
-                status = "removed"
-                diff_percentage = 0.0
-                results.append({
-                    "filename": labelA,
-                    "status": status,
-                    "originalA": image_to_base64(imA),
-                    "originalB": "",
-                    "diffImage": None,
-                    "difference_percentage": 0.0
-                })
-            else:
-                labelA, imA = groupA[ai]
-                labelB, imB = groupB[bj]
-                diff_img, is_changed, diff_percentage = get_diff_image(imA, imB)
-                status = "changed" if is_changed else "unchanged"
-                results.append({
-                    "filename": f"{labelA} ↔ {labelB}",
-                    "status": status,
-                    "originalA": image_to_base64(imA),
-                    "originalB": image_to_base64(imB),
-                    "diffImage": image_to_base64(diff_img) if is_changed else None,
-                    "difference_percentage": diff_percentage
-                })
-
-            left = ("" if ai is None else groupA[ai][0])
-            right = ("" if bj is None else groupB[bj][0])
-            print(f"[Rare] Progress {idx}/{total_pairs} : {status}  {left}  ↔  {right} | diff={diff_percentage:.6f}%")
-            sys.stdout.flush()
 
     end_time = time.time()
     elapsed_time = end_time - start_time

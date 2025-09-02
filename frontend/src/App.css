@@ -137,9 +137,10 @@ button {
 }
 
 .diff-percentage {
-  font-size: 0.6em;
-  color: #888;
+  font-size: 0.7em;
+  color: #777;
   margin-bottom: 10px;
+  margin-left: 20px;
   text-align: center;
 }
 

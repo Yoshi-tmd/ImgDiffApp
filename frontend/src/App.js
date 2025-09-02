@@ -520,6 +520,11 @@ function App() {
                       <div className="diff-header">
                         <h3 className={displayInfo.name === '差分画像' ? "diff-image-title" : ""}>
                           {displayInfo.name}
+                        {displayInfo.name === '差分画像' && (
+                          <span className="diff-percentage">
+                            diff : {pageResult.difference_percentage.toFixed(4)}%
+                          </span>
+                        )}
                         </h3>
                         <label className="diff-mode-checkbox">
                           <input
@@ -538,11 +543,6 @@ function App() {
                             alt={`Comparison - ${pageResult.filename}`}
                             onClick={() => handleImageClick(pageResult.filename)}
                           />
-                          {displayInfo.name === '差分画像' && (
-                            <span className="diff-percentage">
-                              差異の割合: {pageResult.difference_percentage.toFixed(4)}%
-                            </span>
-                          )}
                         </>
                       ) : (
                         <div className="no-diff-message">
